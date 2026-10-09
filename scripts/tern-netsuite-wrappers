@@ -128,7 +128,11 @@ read_prefixes() {
 		plutil -convert json -o /dev/null "$config" || return 1
 		i=0
 		while plutil -extract "lens.wrappers.$i" json -o /dev/null "$config" >/dev/null 2>&1; do
-			plutil -extract "lens.wrappers.$i.prefix" raw -o - "$config" 2>/dev/null
+			# Older plutil prints its "No value at that key path" error on
+			# stdout, so only a successful extraction counts.
+			if p=$(plutil -extract "lens.wrappers.$i.prefix" raw -o - "$config" 2>/dev/null); then
+				printf '%s\n' "$p"
+			fi
 			i=$((i + 1))
 		done
 		;;

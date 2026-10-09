@@ -4,8 +4,10 @@ NetSuite for [Tern](https://stencil.so/tern): native views for the SuiteCloud SD
 a production deploy guard, account status, an SDF project explorer, and
 read-only SuiteQL monitoring (execution logs, account health).
 
-Status: 0.1.0, unreleased. Built and tested against SuiteCloud CLI 3.2.0 and
-Tern 0.6.3.
+![A failed project:validate rendered natively, errors grouped by object](docs/screenshots/lens-validate.png)
+
+Status: 0.1.0, public beta. Built and tested against SuiteCloud CLI 3.2.0 and
+Tern 0.6.3 / 0.7.0.
 
 ## Install
 
@@ -33,6 +35,9 @@ Everything in the "SDF CLI" section works with no NetSuite credentials. The
   For a wrapper such as `npm run validate`, add it to `lens.wrappers` in
   the config, run `scripts/tern-netsuite-wrappers` (`--check` reports drift)
   and `tern plugin reload`.
+
+  ![A production deploy: PROD badge, changes and a Tail logs chip](docs/screenshots/lens-deploy-prod.png)
+
 - **Account indicator.** Inside an SDF project the status line shows which
   account `project.json`'s `defaultAuthId` deploys to:
   `billing -> SB1` (muted), `... PROD` (red) for production,
@@ -45,12 +50,18 @@ Everything in the "SDF CLI" section works with no NetSuite credentials. The
   account wait for an approval block that shows the account, command, git
   state and fingerprinted files, with typed confirmation. Sandbox targets
   run immediately. Install and limitations: [shell/README.md](shell/README.md).
+
+  ![The approve block for a production deploy](docs/screenshots/guard-approve.png)
+
 - **SDF explorer** (`Tern NetSuite: SDF explorer`): every project in the
   repository with its target account, objects, deployments, File Cabinet
   tree, manifest dependencies and deploy.xml paths, plus findings: missing
   manifest dependencies, missing script files, objects or files not covered
   by deploy.xml, deploy paths that match nothing, and the same object or
   File Cabinet path shipped by two projects.
+
+  ![SDF explorer findings across four projects](docs/screenshots/explorer.png)
+
 - **Upload this file** (`Tern NetSuite: Upload this file`): finds the
   project(s) that carry the focused file (following symlinks into shared
   source folders) and runs `suitecloud file:upload` for it in a split,
@@ -65,10 +76,17 @@ Everything in the "SDF CLI" section works with no NetSuite credentials. The
   deploy.xml / manifest.xml edits the project needs, with a live preview.
   Optional templates: `scaffold.templates_dir` with `<type>.js` files using
   `{{scriptId}}` and `{{name}}`.
+
+  ![New script form with a live preview](docs/screenshots/new-script.png)
+
 - **Deploy history** (`Tern NetSuite: Deploy history`): local deploys and
   uploads (recorded when the command finishes), guard decisions, and, with
   `history.ci.workflow` set, the repository's CI deploy runs from `gh` on one
   timeline; the status line adds the branch's latest CI deploy state.
+
+| Status line | Deploy history |
+| --- | --- |
+| ![Account segment and health badge in the status line](docs/screenshots/status-line.png) | ![Deploy history timeline](docs/screenshots/history.png) |
 
 The SuiteCloud CLI reads `project.json` and `suitecloud.config.js` from the
 current directory only, and refreshes OAuth tokens on every account command.
@@ -95,6 +113,9 @@ Then:
   script execution logs (`scriptnote`) with level, script, text and
   `namespace:` filters; JSON details expand as trees
   (`monitor.log_title_json`).
+
+  ![Execution logs with a JSON detail expanded](docs/screenshots/logs.png)
+
 - **Account health** (`Tern NetSuite: Account health`): script errors in
   the last hour and day with a 24 h chart, deployments in testing or not
   deployed, the last error, and your own `monitor.checks` (`count` with
@@ -102,6 +123,8 @@ Then:
   window polls (`monitor.poll_seconds`); a red status-line badge and a toast
   appear when a connection goes into error. Built-in error thresholds:
   `monitor.script_errors`.
+
+  ![Account health dashboard](docs/screenshots/health.png)
 
 Queries run in the Tern window half (the keychain is only available
 there), so a Tern window must be open. Read-only connections
@@ -158,6 +181,11 @@ make smoke-real  # local only: load the checkout in an isolated real Tern under 
   unknown API or one used in the wrong half fails) and requires the
   manifest's lenses and blocks to be defined. CI runs `make check` on macOS
   arm64 and Linux x86_64.
+- `scripts/screenshots.sh` rebuilds the screenshots above from a synthetic
+  workspace in a sandboxed Tern with a fake SuiteCloud CLI (no NetSuite
+  access).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 

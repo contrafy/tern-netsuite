@@ -6,6 +6,7 @@ local fixtures = require("../../lib/fixtures")
 local json = require("../../lib/json")
 local sample = require("./sample")
 local t = require("../../lib/test")
+local ui = require("../../../plugin/lib/ui")
 
 local describe, it, expect = t.describe, t.it, t.expect
 
@@ -48,7 +49,7 @@ local function textOf(node: any): string
 end
 
 local function viewText(s: S): string
-	local v = Render.view(s, 40)
+	local v = Render.view(s)
 	return textOf(v.main) .. "\n" .. textOf(v.dock)
 end
 
@@ -212,7 +213,7 @@ end)
 describe("the target account", function()
 	it("shows a sandbox by its label", function()
 		local s = listed("demo-sb")
-		local v = Render.view(s, 40)
+		local v = Render.view(s)
 		expect(textOf(v.main)).toContain("SB1")
 	end)
 
@@ -428,13 +429,43 @@ describe("clicks", function()
 end)
 
 describe("rendering", function()
-	it("renders only a window of a long list around the selection", function()
+	local function rowList(s: S): any
+		for _, n in (Render.view(s).main :: any).c do
+			if n.p and n.p.key == "rows" then
+				return n
+			end
+		end
+		return nil
+	end
+
+	it("fills the pane whatever size Tern reports: the rows go in a list that scrolls to the selection", function()
 		local s = keys(listed(), { "end" })
-		local v = Render.view(s, 30)
-		local text = textOf(v.main)
+		local list = rowList(s)
+		expect(list.k).toBe("list")
+		expect(list.p.role).toBe(ui.SCROLL_ROLE)
+		-- Every row of a listing below the cap, the first and the selected last.
+		expect(#list.c).toBe(#State.visible(s))
+		local text = textOf(list)
+		expect(text).toContain("addressForm")
 		expect(text).toContain("customscript_demo_136")
-		expect(text).toContain("above")
-		expect((string.find(text, "addressForm", 1, true))).toBeNil()
+		local selected = State.selectedEntry(s) :: any
+		expect(list.p.selected).toBe("main.rows.r:" .. selected.kind .. ":" .. selected.id)
+	end)
+
+	it("draws only a window around the selection of a listing past MAX_ROWS", function()
+		local s = listed()
+		local many = {}
+		for i = 1, Render.MAX_ROWS + 50 do
+			table.insert(many, { kind = "object", id = string.format("customlist_many_%03d", i), where = "account" })
+		end
+		s.entries.object = many :: any
+		s = keys(s, { "end" })
+		local list = rowList(s)
+		expect(#list.c).toBe(Render.MAX_ROWS)
+		local text = textOf(Render.view(s).main)
+		expect(text).toContain("customlist_many_350")
+		expect(text).toContain("50 above")
+		expect((string.find(text, "customlist_many_001", 1, true))).toBeNil()
 	end)
 
 	it("titles the pane with the project", function()

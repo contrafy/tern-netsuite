@@ -25,16 +25,20 @@ local M = {}
 
 -- Projects scanned per run; a monorepo has tens.
 M.MAX_PROJECTS = 200
+-- Assumed for paging and wrapping while Tern reports no pane size
+-- (lib/pane.luau).
 M.DEFAULT_HEIGHT = 40
 M.DEFAULT_WIDTH = 100
--- Characters of the dock's key hints (render.luau), for the line budget.
+-- Characters of the dock's key hints (render.luau), for the page estimate.
 M.HINTS_CHARS = 115
 M.MIN_ROWS = 5
--- Lines drawn at most, whatever the pane height.
+-- Lines of rows drawn at most: the scrolling row list (ui.scroll) shows
+-- what fits the pane, so the window no longer depends on the height.
 M.MAX_RENDER_ROWS = 200
 
 M.PICK_FLAG = "--pick"
 
+-- `height`, `width`: the pane size in cells, only when Tern measured it.
 export type InitOpts = { cwd: string?, height: number?, width: number? }
 
 local function absolute(p: string?): string?
@@ -97,8 +101,8 @@ function M.init(args: { string }, opts: InitOpts): (State, { Effect })
 		offset = {},
 		filters = {},
 		editing = false,
-		height = opts.height or M.DEFAULT_HEIGHT,
-		width = opts.width or M.DEFAULT_WIDTH,
+		height = opts.height,
+		width = opts.width,
 		notice = nil,
 	}
 	return s, { { t = "config", gen = s.gen } }
@@ -116,11 +120,11 @@ function M.progress(s: State): { done: number, total: number, current: string? }
 	return { done = s.done, total = s.total, current = s.current }
 end
 
--- Lines left for rows: the pane height minus what the header, tabs,
+-- Rows that fit the pane: its height minus what the header, tabs,
 -- progress, notice, filter, overflow lines, the gaps between them and the
--- dock take at this width.
+-- dock take at its width. Sizes paging only (DEFAULT_HEIGHT when unknown).
 function M.viewport(s: State): number
-	local w = s.width
+	local w = s.width or M.DEFAULT_WIDTH
 	-- Header, gap, tabs, gap.
 	local chrome = Rows.wrap("SDF explorer  " .. (s.base or s.cwd), w) + 3
 	if s.phase ~= "ready" then
@@ -137,12 +141,19 @@ function M.viewport(s: State): number
 	end
 	-- Overflow lines above and below, the gaps around the rows, the dock.
 	chrome += 5 + Rows.wrap(string.rep("x ", M.HINTS_CHARS // 2), w)
-	return math.clamp(s.height - chrome, M.MIN_ROWS, M.MAX_RENDER_ROWS)
+	return math.clamp((s.height or M.DEFAULT_HEIGHT) - chrome, M.MIN_ROWS, M.MAX_RENDER_ROWS)
 end
 
--- First and last row index to draw, keeping `selected` in view.
+-- First and last row index to draw (at most MAX_RENDER_ROWS wrapped
+-- lines), keeping `selected` among them.
 function M.window(s: State, rows: { Row }, selected: number): (number, number)
-	return Rows.window(rows, math.max(selected, 1), s.offset[M.viewKey(s)], M.viewport(s), s.width)
+	return Rows.window(
+		rows,
+		math.max(selected, 1),
+		s.offset[M.viewKey(s)],
+		M.MAX_RENDER_ROWS,
+		s.width or M.DEFAULT_WIDTH
+	)
 end
 
 -- Index of the selected row in `rows` (the first selectable one when the
@@ -215,6 +226,10 @@ local function move(s: State, delta: number, to: number?)
 		return
 	end
 	local nextPos = if to == 1 then 1 elseif to == -1 then #selectable else math.clamp(pos + delta, 1, #selectable)
+	if nextPos == 1 then
+		-- Back at the top: draw the headings above the first selectable row.
+		s.offset[M.viewKey(s)] = 1
+	end
 	selectIndex(s, rows, selectable[nextPos])
 end
 
@@ -504,9 +519,7 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 	elseif ch == "k" or name == "up" then
 		move(s, -1)
 	elseif name == "pagedown" or name == "pageup" then
-		local rows = M.rows(s)
-		local first, last = M.window(s, rows, M.selectedIndex(s, rows))
-		local page = math.max(1, last - first)
+		local page = math.max(1, M.viewport(s) - 1)
 		move(s, if name == "pagedown" then page else -page)
 	elseif name == "home" or ch == "g" then
 		move(s, 0, 1)

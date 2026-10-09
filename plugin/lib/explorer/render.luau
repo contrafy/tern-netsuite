@@ -1,7 +1,8 @@
 --!strict
 -- Draws the explorer: header, tabs, scan progress, notice, filter line and
--- a window of the current view's rows (at most State.viewport(s) of them,
--- with "more above/below" lines), plus a dock of key hints.
+-- a window of the current view's rows (at most State.MAX_RENDER_ROWS lines,
+-- with "more above/below" lines) in a list that fills the pane and keeps
+-- the selected row in view (ui.scroll), plus a dock of key hints.
 
 local Rows = require("./rows")
 local State = require("./state")
@@ -16,6 +17,10 @@ local M = {}
 
 local function relative(s: Types.State, path: string): string
 	return Rows.relative(s.base, path)
+end
+
+local function rowKey(r: Row): string
+	return "row:" .. r.key
 end
 
 local function rowNode(r: Row, index: number, rows: { Row }, selected: boolean): Node
@@ -35,7 +40,7 @@ local function rowNode(r: Row, index: number, rows: { Row }, selected: boolean):
 		end
 		table.insert(spans, ui.span(sp.t, style))
 	end
-	local props: { [string]: any } = { key = "row:" .. r.key }
+	local props: { [string]: any } = { key = rowKey(r) }
 	if r.tone then
 		props.tone = r.tone
 	end
@@ -132,12 +137,14 @@ function M.view(s: Types.State): { main: Node, dock: Node }
 	if first > 1 then
 		table.insert(main, ui.muted(string.format("↑ %d more above (k, pageup, g)", first - 1), { key = "above" }))
 	end
-	-- One gapless stack, so the line budget State.window measures holds.
 	local list: { Node } = {}
 	for i = first, last do
 		table.insert(list, rowNode(rows[i], i, rows, i == selected))
 	end
-	table.insert(main, ui.col(list, { key = "rows", gap = "none" }))
+	table.insert(
+		main,
+		ui.scroll("rows", list, if rows[selected] then rowKey(rows[selected]) else nil, State.MAX_RENDER_ROWS)
+	)
 	if last < #rows then
 		table.insert(
 			main,

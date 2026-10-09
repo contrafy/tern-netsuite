@@ -211,8 +211,8 @@ function M.register()
 			exec(h, effects)
 			return h
 		end,
-		view = function(h: Host, cx: BlockCx): BlockView
-			local ok, v = pcall(Render.view, h.s, cx.rows)
+		view = function(h: Host, _cx: BlockCx): BlockView
+			local ok, v = pcall(Render.view, h.s)
 			if not ok then
 				warnOnce(h, "view", v)
 				return errorView(v)

@@ -122,6 +122,30 @@ function M.muted(text: string, props: { [string]: any }?): Node
 	return M.text({ M.span(text, "muted") }, props)
 end
 
+-- Role of the row list of a block (plugin/tern-netsuite.css): it fills the
+-- main region below the header and scrolls itself, and Tern scrolls it to
+-- the selected row. Works whatever size Tern reports (lib/pane.luau).
+M.SCROLL_ROLE = "tern-netsuite.scroll"
+
+-- The rows of a block: `key` names the list, a direct child of the main
+-- region's root; `selected` is the key of the selected child (nil: none);
+-- `lines` caps its height where the style sheet does not apply.
+function M.scroll(key: string, children: { Node }, selected: string?, lines: number): Node
+	return {
+		k = "list",
+		p = {
+			key = key,
+			role = M.SCROLL_ROLE,
+			gap = "none",
+			-- Tern matches `selected` against node ids: region.list.child.
+			selected = if selected then "main." .. key .. "." .. selected else nil,
+			-- Tern keeps the selected row in view only with `max`.
+			max = { lines = lines },
+		},
+		c = children,
+	}
+end
+
 -- Same output as `tern.ui.overflow(hidden)`.
 function M.overflow(hidden: number): Node
 	return M.muted("… " .. hidden .. " more (Raw shows everything)")

@@ -149,8 +149,8 @@ local function errorCard(s: State, e: Errors.NsError): Node
 	return ui.card({ ui.span("The log tail cannot read NetSuite", "strong") }, body, { key = "errcard" })
 end
 
--- Rows must stay on one line or the window (State.viewport) no longer fits
--- the block: the script column and the date shrink in narrow blocks, then
+-- Rows must stay on one line so the scrolling list (ui.scroll) counts its
+-- lines right: the script column and the date shrink in narrow blocks, then
 -- the title is clipped and the detail preview fills what is left.
 local MARGIN = 4
 local LEVEL_WIDTH = 10
@@ -231,7 +231,7 @@ local function rows(s: State): { Node }
 		return out
 	end
 	local sel = State.selectedIndex(s, list)
-	local first, last = State.window(sel, #list, s.offset, State.viewport(s.height, s.detailOpen))
+	local first, last = State.window(sel, #list, s.offset, State.MAX_RENDER_ROWS)
 	if first > 1 then
 		table.insert(
 			out,
@@ -245,8 +245,7 @@ local function rows(s: State): { Node }
 	for i = first, last do
 		table.insert(lines, rowNode(s, list[i], i == sel))
 	end
-	-- `lines` rendered none of these rows in Tern 0.6.3; a gapless col does.
-	table.insert(out, ui.col(lines, { key = "rows", gap = "none" }))
+	table.insert(out, ui.scroll("rows", lines, "r" .. list[sel].id, State.MAX_RENDER_ROWS))
 	if last < #list then
 		table.insert(
 			out,

@@ -149,6 +149,50 @@ describe("the execution log view", function()
 		expect(text(View.view(s))).toContain("5 older rows dropped")
 	end)
 
+	it("puts the rows in a list that fills the pane and keeps the selection in view", function()
+		local s = loaded()
+		local main = View.view(s).main :: any
+		local list: any = nil
+		for _, n in main.c do
+			if n.p and n.p.key == "rows" then
+				list = n
+			end
+		end
+		expect(list.p.role).toBe("tern-netsuite.scroll")
+		local visible = State.visible(s)
+		expect(list.p.selected).toBe("main.rows.r" .. visible[State.selectedIndex(s, visible)].id)
+		expect(list.p.max.lines).toBe(State.MAX_RENDER_ROWS)
+	end)
+
+	it("draws more rows than the reported height, since Tern 0.7.0 reports 80x24 for any pane", function()
+		local many = {}
+		for i = 1, 100 do
+			table.insert(many, {
+				internalid = 6000000 + i,
+				logged = string.format("2026-10-09 00:%02d:%02d", i // 60, i % 60),
+				type = "DEBUG",
+				title = "bulk",
+				detail = "",
+			})
+		end
+		local reloaded, effects = State.update(loaded(), { t = "key", key = key("r") })
+		local req = 0
+		for _, e in effects do
+			if e.t == "query" then
+				req = e.req :: number
+			end
+		end
+		local s = State.update(reloaded, { t = "result", req = req, rows = many, at = "x" })
+		s = State.update(s, { t = "resize", height = 24, width = 80 })
+		local list: any = nil
+		for _, n in (View.view(s).main :: any).c do
+			if n.p and n.p.key == "rows" then
+				list = n
+			end
+		end
+		expect(#list.c).toBe(100)
+	end)
+
 	it("keeps every row on one line of a narrow block so the visible window stays accurate", function()
 		for _, cols in { 60, 100, 200 } do
 			local s = State.update(loaded(), { t = "resize", height = 40, width = cols })

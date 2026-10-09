@@ -115,12 +115,15 @@ M.MAX_BACKOFF_MS = 300000
 M.FILTER_INPUT = "main.filter"
 M.SAVE_VERSION = 1
 -- Lines of the block that are not log rows (header, filter, status, hints)
--- and an estimate of the detail dock.
+-- and an estimate of the detail dock; they size a page (PgUp/PgDn).
 M.CHROME_LINES = 9
 M.DOCK_LINES = 8
--- Tern 0.6.3 reports 80x24 for a block that never resized, whatever its
--- real size, so the window never shrinks below this many rows.
+-- A page never shrinks below this many rows, whatever height was measured.
 M.MIN_VIEWPORT = 12
+-- Rows drawn at most, around the selection, in a list that fills the pane
+-- and keeps the selection in view (ui.scroll). Never sized from the height:
+-- Tern 0.7.0 reports 80x24 for a block that never resized.
+M.MAX_RENDER_ROWS = 300
 M.SCROLLOFF = 2
 
 -- Accessors ---------------------------------------------------------------------
@@ -188,6 +191,7 @@ function M.level(s: State): number
 	return s.level
 end
 
+-- Rows in a page: `height` is a measured height (lib/pane.luau) or nil.
 function M.viewport(height: number?, detailOpen: boolean): number
 	local h = (height or 40) - M.CHROME_LINES - (if detailOpen then M.DOCK_LINES else 0)
 	return math.max(h, M.MIN_VIEWPORT)
@@ -545,7 +549,7 @@ local function settle(s: State)
 		s.selId = nil
 		i = 1
 	end
-	s.offset = M.window(i, #list, s.offset, M.viewport(s.height, s.detailOpen))
+	s.offset = M.window(i, #list, s.offset, M.MAX_RENDER_ROWS)
 	local e = list[i]
 	if s.detailOpen and e and (s.parsed == nil or (s.parsed :: any).id ~= e.id) then
 		s.parsed = {

@@ -6,7 +6,7 @@ description = "NetSuite for Tern: native SuiteCloud SDF CLI views (validate, dep
 icon = "cloud"
 host = "plugin/host.luau"
 window = "plugin/window.luau"
-styles = []
+styles = ["plugin/tern-netsuite.css"]
 
 [[blocks]]
 id = "doctor"

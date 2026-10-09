@@ -1,0 +1,16 @@
+/* Tern NetSuite blocks.
+
+   Row lists (lib/ui.luau `scroll`): Tern 0.7.0 never tells a block its pane
+   size (lib/pane.luau), so a block cannot size its rows to the pane. The
+   list takes the height the main region has left below the header and
+   scrolls itself; Tern scrolls it to the selected row (`selected` + `max`).
+   Below a few rows the main region scrolls instead. */
+.sf-main[data-surface^="plugin.tern-netsuite."] > .sf-list[data-role="tern-netsuite.scroll"] {
+	flex: 1 1 0;
+	min-height: 100px;
+}
+
+.sf-main[data-surface^="plugin.tern-netsuite."] > .sf-list[data-role="tern-netsuite.scroll"] > .sf-list-scroll {
+	flex: 1 1 0;
+	min-height: 0;
+}

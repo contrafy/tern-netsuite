@@ -15,3 +15,5 @@ First version.
 - Read-only NetSuite connection layer (TBA and OAuth 2.0 M2M; REST SuiteQL
   and RESTlet transports; keychain credentials), execution log tail and
   account health with a status-line badge.
+- Blocks fill their pane on Tern 0.7.0: row lists scroll themselves instead
+  of being sized from `cx.rows`, which Tern 0.7.0 leaves at 80x24.

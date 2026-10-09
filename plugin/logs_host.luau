@@ -10,12 +10,13 @@
 
 local ConfigHost = require("./config_host")
 local NsHost = require("./ns_host")
+local Pane = require("./lib/pane")
 local State = require("./lib/monitor/logs/state")
 local View = require("./lib/monitor/logs/view")
 
 local log = tern.log
 
-type Host = { s: State.State, cx: BlockCx, stopped: boolean, warned: boolean }
+type Host = { s: State.State, cx: BlockCx, stopped: boolean, warned: boolean, resized: boolean }
 
 local M = {}
 
@@ -153,13 +154,15 @@ function M.register()
 				local snap = ConfigHost.load()
 				local s, effects =
 					State.init(args, saved, snap.config, { decode = tern.json.decode, null = tern.json.null })
-				local h: Host = { s = s, cx = cx, stopped = false, warned = false }
+				local h: Host = { s = s, cx = cx, stopped = false, warned = false, resized = false }
 				exec(h, effects)
 				return h
 			end,
 			view = function(h: Host, cx: BlockCx): BlockView
-				if cx.rows ~= h.s.height or cx.cols ~= h.s.width then
-					dispatch(h, { t = "resize", height = cx.rows, width = cx.cols })
+				-- Only a measured size: Tern 0.7.0 leaves cx at 80x24 (lib/pane.luau).
+				local cols, rows = Pane.size(cx.cols, cx.rows, h.resized)
+				if rows and (rows ~= h.s.height or cols ~= h.s.width) then
+					dispatch(h, { t = "resize", height = rows, width = cols })
 				end
 				local ok, v = pcall(View.view, h.s)
 				if not ok then
@@ -178,6 +181,7 @@ function M.register()
 			end,
 			resize = function(h: Host, cols: number, rows: number, cx: BlockCx)
 				h.cx = cx
+				h.resized = true
 				dispatch(h, { t = "resize", height = rows, width = cols })
 			end,
 			event = function(h: Host, ev: UiEvent, cx: BlockCx)

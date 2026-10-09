@@ -7,11 +7,13 @@ local Snapshot = require("../../../plugin/lib/sdf/snapshot")
 local State = require("../../../plugin/lib/explorer/state")
 local json = require("../../lib/json")
 local t = require("../../lib/test")
+local ui = require("../../../plugin/lib/ui")
 
 local describe, it, expect = t.describe, t.it, t.expect
 
 type State = State.State
 type Effect = State.Effect
+type Row = State.Row
 
 local NOW = 5000000
 
@@ -484,47 +486,89 @@ describe("large repositories", function()
 		return snap
 	end
 
-	it("renders only a window of rows with overflow lines instead of every file", function()
-		local s, effects = State.init({ "/repo/sdf/billing" }, { height = 30 })
+	local function bigBilling(opts: State.InitOpts): State
+		local s, effects = State.init({ "/repo/sdf/billing" }, opts)
 		s, effects = State.update(s, { t = "config", gen = 1, config = config(), now = NOW })
 		s, effects = State.update(s, { t = "located", gen = 1, repoRoot = "/repo", projectRoot = "/repo/sdf/billing" })
 		s, effects = State.update(s, { t = "discovered", gen = 1, roots = Sample.ROOTS })
 		s = scanAll(s, effects, big)
-		s = key(s, "enter")
+		return (key(s, "enter"))
+	end
+
+	local function rowList(s: State): any
+		for _, n in (Render.view(s).main :: any).c do
+			if n.p and n.p.key == "rows" then
+				return n
+			end
+		end
+		return nil
+	end
+
+	it("fills the pane whatever size Tern reports: up to MAX_RENDER_ROWS rows in a scrolling list", function()
+		-- Tern 0.7.0 reports no real size: the host passes none.
+		local s = bigBilling({})
 		expect(#State.rows(s) > 600).toBe(true)
-		local lines = texts(Render.view(s).main)
-		expect(#lines < 40).toBe(true)
+		local list = rowList(s)
+		expect(list.k).toBe("list")
+		expect(list.p.role).toBe(ui.SCROLL_ROLE)
+		expect(#list.c > 100).toBe(true)
+		expect(#list.c <= State.MAX_RENDER_ROWS).toBe(true)
+		expect(list.p.selected).toBe("main.rows.row:" .. (State.selected(s) :: Row).key)
 		expect(screen(s)).toContain("more below")
 		s = key(s, "end")
 		expect(screen(s)).toContain("more above")
 		expect((State.selected(s) :: any).text).toContain("~/Objects/*")
+		expect(rowList(s).p.selected).toBe("main.rows.row:" .. (State.selected(s) :: Row).key)
 	end)
 
-	it(
-		"measures the window in wrapped lines, so long findings in a narrow pane keep the selection on screen",
-		function()
-			local s, effects = State.init({ "/repo/sdf/billing" }, { height = 20, width = 30 })
-			s, effects = State.update(s, { t = "config", gen = 1, config = config(), now = NOW })
-			s, effects =
-				State.update(s, { t = "located", gen = 1, repoRoot = "/repo", projectRoot = "/repo/sdf/billing" })
-			s, effects = State.update(s, { t = "discovered", gen = 1, roots = Sample.ROOTS })
-			s = scanAll(s, effects)
-			s = key(s, "tab")
-			for _ = 1, 6 do
-				s = key(s, "j")
-			end
+	it("draws the same rows in a short pane as in a tall one: the list scrolls, not the core", function()
+		expect(#rowList(bigBilling({ height = 20, width = 100 })).c).toBe(#rowList(bigBilling({})).c)
+	end)
+
+	it("shows the rows above the first selectable one again after going back to the top", function()
+		local s = bigBilling({})
+		s = key(s, "end")
+		s = key(s, "home")
+		expect((string.find(screen(s), "more above", 1, true))).toBeNil()
+		expect(texts(rowList(s))[1]).toContain("root")
+	end)
+
+	it("pages by the height Tern reports, else by a default page", function()
+		local function paged(s: State): number
 			local rows = State.rows(s)
-			local selected = State.selectedIndex(s, rows)
-			local first, last = State.window(s, rows, selected)
-			expect(selected >= first and selected <= last).toBe(true)
-			local used = 0
-			for i = first, last do
-				used += Rows.lines(rows[i], 30)
-			end
-			expect(used <= State.viewport(s)).toBe(true)
-			expect(last - first + 1 < State.viewport(s)).toBe(true)
+			local before = State.selectedIndex(s, rows)
+			s = key(s, "pagedown")
+			return State.selectedIndex(s, rows) - before
 		end
-	)
+		local short = paged(bigBilling({ height = 20, width = 100 }))
+		local tall = paged(bigBilling({ height = 80, width = 100 }))
+		expect(short >= 1).toBe(true)
+		expect(tall > short).toBe(true)
+		expect(paged(bigBilling({}))).toBe(paged(bigBilling({ height = State.DEFAULT_HEIGHT })))
+		local resized = State.update(bigBilling({}), { t = "resize", rows = 80, cols = 100 })
+		expect(paged(resized)).toBe(tall)
+	end)
+
+	it("measures the window in wrapped lines, so long findings in a narrow pane stay within the drawn lines", function()
+		local s, effects = State.init({ "/repo/sdf/billing" }, { height = 20, width = 30 })
+		s, effects = State.update(s, { t = "config", gen = 1, config = config(), now = NOW })
+		s, effects = State.update(s, { t = "located", gen = 1, repoRoot = "/repo", projectRoot = "/repo/sdf/billing" })
+		s, effects = State.update(s, { t = "discovered", gen = 1, roots = Sample.ROOTS })
+		s = scanAll(s, effects)
+		s = key(s, "tab")
+		for _ = 1, 6 do
+			s = key(s, "j")
+		end
+		local rows = State.rows(s)
+		local selected = State.selectedIndex(s, rows)
+		local first, last = State.window(s, rows, selected)
+		expect(selected >= first and selected <= last).toBe(true)
+		local used = 0
+		for i = first, last do
+			used += Rows.lines(rows[i], 30)
+		end
+		expect(used <= State.MAX_RENDER_ROWS).toBe(true)
+	end)
 
 	it("caps the number of projects scanned", function()
 		local roots = {}

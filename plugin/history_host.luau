@@ -389,18 +389,14 @@ function exec(h: Host, effects: { State.Effect })
 	end
 end
 
-local function format(rows: number): View.Format
-	return {
-		day = function(at: number): string
-			return os.date("%Y-%m-%d %a", at) :: string
-		end,
-		clock = function(at: number): string
-			return os.date("%H:%M", at) :: string
-		end,
-		-- Room for the filters, CI line, day rules and the dock.
-		rows = math.max(5, rows - 10),
-	}
-end
+local FORMAT: View.Format = {
+	day = function(at: number): string
+		return os.date("%Y-%m-%d %a", at) :: string
+	end,
+	clock = function(at: number): string
+		return os.date("%H:%M", at) :: string
+	end,
+}
 
 local function errorView(err: any): BlockView
 	return {
@@ -451,8 +447,8 @@ function M.register()
 			exec(h, effects)
 			return h
 		end,
-		view = function(h: Host, cx: BlockCx): BlockView
-			local ok, v = pcall(View.view, h.s, format(cx.rows))
+		view = function(h: Host, _cx: BlockCx): BlockView
+			local ok, v = pcall(View.view, h.s, FORMAT)
 			if not ok then
 				warnOnce(h, "view", v)
 				return errorView(v)

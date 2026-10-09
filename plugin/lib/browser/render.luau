@@ -1,7 +1,9 @@
 --!strict
 -- The browser block's view: target account, side/type/search filters, a
--- window of the filtered list around the selection, and a dock with the
--- last message and the keys. Pure: `{k, p, c}` nodes from lib/ui.
+-- window of the filtered list around the selection (at most MAX_ROWS) in a
+-- list that fills the pane and keeps the selection in view (ui.scroll),
+-- and a dock with the last message and the keys. Pure: `{k, p, c}` nodes
+-- from lib/ui.
 
 local Diff = require("./diff")
 local State = require("./state")
@@ -13,9 +15,7 @@ type Entry = Diff.Entry
 
 local M = {}
 
--- Rows of the block that are not list rows (header, filters, dock).
-M.CHROME_ROWS = 14
-M.MIN_ROWS = 5
+-- Rows drawn at most; the scrolling list shows what fits the pane.
 M.MAX_ROWS = 300
 
 local WHERE_LABEL: { [string]: string } = { account = "account", both = "both", ["local"] = "local" }
@@ -137,6 +137,10 @@ local function filters(s: State): { Node }
 	return { kinds, sides, search }
 end
 
+local function rowKey(e: Entry): string
+	return "r:" .. e.kind .. ":" .. e.id
+end
+
 local function rowNode(e: Entry, i: number, selected: boolean): Node
 	local spans: { ui.SpanLike } = {
 		ui.span(if selected then "▸ " else "  ", "strong"),
@@ -147,10 +151,10 @@ local function rowNode(e: Entry, i: number, selected: boolean): Node
 		table.insert(spans, ui.span(e.type .. " ", "muted"))
 	end
 	table.insert(spans, ui.span(e.id, if selected then "code strong" else "code"))
-	return ui.text(spans, { key = "r:" .. e.kind .. ":" .. e.id, actions = { click = "sel=" .. i } })
+	return ui.text(spans, { key = rowKey(e), actions = { click = "sel=" .. i } })
 end
 
-local function listNodes(s: State, rows: number): { Node }
+local function listNodes(s: State): { Node }
 	local out: { Node } = {}
 	local all = s.entries[s.kind]
 	local visible = State.visible(s)
@@ -161,16 +165,18 @@ local function listNodes(s: State, rows: number): { Node }
 		table.insert(out, ui.muted(why, { key = "empty" }))
 		return out
 	end
-	local size = math.clamp(rows - M.CHROME_ROWS, M.MIN_ROWS, M.MAX_ROWS)
+	local size = M.MAX_ROWS
 	local sel = math.clamp(s.selected, 1, #visible)
 	local first = math.clamp(sel - size // 2, 1, math.max(#visible - size + 1, 1))
 	local last = math.min(first + size - 1, #visible)
 	if first > 1 then
 		table.insert(out, ui.muted(string.format("↑ %d above", first - 1), { key = "above" }))
 	end
+	local rows: { Node } = table.create(last - first + 1)
 	for i = first, last do
-		table.insert(out, rowNode(visible[i], i, i == sel))
+		table.insert(rows, rowNode(visible[i], i, i == sel))
 	end
+	table.insert(out, ui.scroll("rows", rows, rowKey(visible[sel]), size))
 	if last < #visible then
 		table.insert(out, ui.muted(string.format("↓ %d below", #visible - last), { key = "below" }))
 	end
@@ -217,7 +223,7 @@ local function dock(s: State): Node
 	return ui.col(children, { key = "dock" })
 end
 
-function M.view(s: State, rows: number): { main: Node, dock: Node }
+function M.view(s: State): { main: Node, dock: Node }
 	local children: { Node } = { header(s) }
 	if s.phase == "noproject" then
 		local where = s.cwd or "this pane"
@@ -250,7 +256,7 @@ function M.view(s: State, rows: number): { main: Node, dock: Node }
 		for _, n in filters(s) do
 			table.insert(children, n)
 		end
-		for _, n in listNodes(s, rows) do
+		for _, n in listNodes(s) do
 			table.insert(children, n)
 		end
 	end

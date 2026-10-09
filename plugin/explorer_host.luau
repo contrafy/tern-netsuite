@@ -9,6 +9,7 @@ local ConfigHost = require("./config_host")
 local Context = require("./lib/account/context")
 local Link = require("./lib/explorer/link")
 local Manageauth = require("./lib/account/manageauth")
+local Pane = require("./lib/pane")
 local ProjectHost = require("./project_host")
 local Render = require("./lib/explorer/render")
 local Resolve = require("./lib/account/resolve")
@@ -19,7 +20,7 @@ local log = tern.log
 type Effect = State.Effect
 type Msg = State.Msg
 
-type Host = { s: State.State, cx: BlockCx, stopped: boolean, warned: boolean }
+type Host = { s: State.State, cx: BlockCx, stopped: boolean, warned: boolean, resized: boolean }
 
 local M = {}
 
@@ -171,12 +172,18 @@ end
 function M.register()
 	tern.block.define("explorer", {
 		init = function(cx: BlockCx, args: { string }, _saved: any): Host
-			local s, effects = State.init(args, { cwd = cx.cwd, height = cx.rows, width = cx.cols })
-			local h: Host = { s = s, cx = cx, stopped = false, warned = false }
+			local cols, rows = Pane.size(cx.cols, cx.rows, false)
+			local s, effects = State.init(args, { cwd = cx.cwd, height = rows, width = cols })
+			local h: Host = { s = s, cx = cx, stopped = false, warned = false, resized = false }
 			exec(h, effects)
 			return h
 		end,
-		view = function(h: Host, _cx: BlockCx): BlockView
+		view = function(h: Host, cx: BlockCx): BlockView
+			-- Tern without a `resize` call still updates cx.cols/cx.rows.
+			local cols, rows = Pane.size(cx.cols, cx.rows, h.resized)
+			if cols and (cols ~= h.s.width or rows ~= h.s.height) then
+				dispatch(h, { t = "resize", rows = rows, cols = cols })
+			end
 			local ok, v = pcall(Render.view, h.s)
 			if not ok then
 				warnOnce(h, "view", v)
@@ -199,6 +206,7 @@ function M.register()
 		end,
 		resize = function(h: Host, cols: number, rows: number, cx: BlockCx)
 			h.cx = cx
+			h.resized = true
 			dispatch(h, { t = "resize", rows = rows, cols = cols })
 		end,
 	})

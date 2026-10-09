@@ -13,11 +13,14 @@ type Item = Timeline.Item
 export type Format = {
 	day: (number) -> string,
 	clock: (number) -> string,
-	-- Timeline rows shown at once.
-	rows: number,
 }
 
 local M = {}
+
+-- Timeline rows drawn at most, around the selection. They sit in a list
+-- that fills the pane and keeps the selection in view (ui.scroll), so the
+-- block never sizes them from cx.rows, which Tern 0.7.0 leaves at 80x24.
+M.MAX_ROWS = 300
 
 local SOURCE_TONE: { [string]: string } = { ["local"] = "neutral", guard = "warning", ci = "info" }
 -- Keeps a CI row on one line in a half-width pane.
@@ -167,17 +170,19 @@ local function listView(s: State.State, fmt: Format): Node
 		table.insert(out, ui.muted(text, { key = "empty" }))
 		return ui.col(out, { key = "history" })
 	end
-	local first, last = window(items, s.sel, math.max(fmt.rows, 5))
+	local first, last = window(items, s.sel, M.MAX_ROWS)
 	if first > 1 then
 		table.insert(out, ui.muted(string.format("↑ %d newer", first - 1), { key = "above" }))
 	end
 	local shown = table.move(items, first, last, 1, {})
+	local lines: { Node } = {}
 	for _, day in Timeline.group(shown, fmt.day) do
-		table.insert(out, ui.rule({ day.day }, { key = "d-" .. day.day }))
+		table.insert(lines, ui.rule({ day.day }, { key = "d-" .. day.day }))
 		for _, item in day.items do
-			table.insert(out, row(item, item.key == s.sel, fmt))
+			table.insert(lines, row(item, item.key == s.sel, fmt))
 		end
 	end
+	table.insert(out, ui.scroll("rows", lines, s.sel, M.MAX_ROWS))
 	if last < #items then
 		table.insert(out, ui.muted(string.format("↓ %d older", #items - last), { key = "below" }))
 	end

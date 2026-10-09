@@ -87,8 +87,9 @@ export type State = {
 	offset: { [string]: number },
 	filters: { [string]: string },
 	editing: boolean,
-	height: number,
-	width: number,
+	-- The pane size in cells, nil until Tern reports one (lib/pane.luau).
+	height: number?,
+	width: number?,
 	notice: Notice?,
 }
 

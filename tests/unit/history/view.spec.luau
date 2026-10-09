@@ -15,8 +15,23 @@ local FMT: View.Format = {
 	clock = function(at: number): string
 		return os.date("!%H:%M", at) :: string
 	end,
-	rows = 40,
 }
+
+local function find(n: any, k: string): any
+	if type(n) ~= "table" then
+		return nil
+	end
+	if n.p and n.p.key == k then
+		return n
+	end
+	for _, c in n.c or {} do
+		local f = find(c, k)
+		if f then
+			return f
+		end
+	end
+	return nil
+end
 
 local function line(r: { [string]: any }): string
 	local base: { [string]: any } = {
@@ -118,6 +133,15 @@ describe("the history block", function()
 		expect(text).toContain("develop@74fbe17*")
 		expect(text).toContain("1m 12s")
 		expect(text).toContain("billing | deploy")
+	end)
+
+	it("puts the timeline in a list that fills the pane and keeps the selection in view", function()
+		local s = loaded()
+		local list = find(View.view(s, FMT).main, "rows")
+		expect(list ~= nil).toBe(true)
+		expect(list.p.role).toBe("tern-netsuite.scroll")
+		expect(list.p.selected).toBe("main.rows." .. (s.sel :: string))
+		expect(list.p.max.lines).toBe(View.MAX_ROWS)
 	end)
 
 	it("flags production deploys in the error tone so they stand out", function()

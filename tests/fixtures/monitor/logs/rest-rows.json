@@ -1,0 +1,24 @@
+[
+  {
+    "links": [],
+    "internalid": "5771427",
+    "logged": "2026-10-08 22:15:40",
+    "type": "AUDIT",
+    "title": "suiteql:exec.done",
+    "detail": "{\"count\":3}",
+    "scripttype": "3561",
+    "scriptid": "customscript_demo_suiteql",
+    "scriptname": "SuiteQL RESTlet"
+  },
+  {
+    "links": [],
+    "internalid": "5771426",
+    "logged": "2026-10-08 22:15:39",
+    "type": "AUDIT",
+    "title": "suiteql:exec.start",
+    "detail": "{\"len\":127,\"params\":0,\"account\":\"1234567_SB1\"}",
+    "scripttype": "3561",
+    "scriptid": "customscript_demo_suiteql",
+    "scriptname": "SuiteQL RESTlet"
+  }
+]

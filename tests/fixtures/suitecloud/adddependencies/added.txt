@@ -1,0 +1,3 @@
+The following dependencies were added to the manifest:
+Feature - SERVERSIDESCRIPTING:required
+File - /SuiteScripts/tns_shared.js

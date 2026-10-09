@@ -1,0 +1,4 @@
+/SuiteScripts/tns_demo/lib/tns_util.js
+/SuiteScripts/tns_demo/tns_demo_restlet.js
+/SuiteScripts/tns_demo_suitelet.js
+/SuiteScripts/tns demo/report template.html

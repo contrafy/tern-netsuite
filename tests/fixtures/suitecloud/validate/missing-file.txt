@@ -1,0 +1,7 @@
+The validation process has encountered an error.
+The following errors were found during local validation:
+Errors for file: /work/proj/missingfile/src/Objects/customscript_tns_demo.xml.
+  - Line No. 9 - Error message: The file referenced in "scriptfile" is missing in the project and is not included in the dependencies list.
+Errors for file: /work/proj/missingfile/src/manifest.xml.
+  - Line No. 1 - Error message: The following dependencies are missing from the manifest.xml file: [File - /SuiteScripts/tns_missing.js]
+

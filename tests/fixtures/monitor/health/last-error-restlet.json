@@ -1,0 +1,1 @@
+{"ok":true,"rows":[{"at":"2026-10-08 22:25:36","title":"restlet.error","detail":"{\"name\":\"INVALID_NUMBER_OF_PARAMETERS\",\"message\":\"Invalid number of parameters\"}","script":"customscript_demo_suiteql","script_name":"Demo SuiteQL RESTlet"}]}

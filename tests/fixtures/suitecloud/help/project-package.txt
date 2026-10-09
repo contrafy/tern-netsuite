@@ -1,0 +1,8 @@
+Usage: suitecloud project:package [options]
+
+Generates a ZIP file from your project, respecting the structure specified in
+the deploy.xml file.
+
+Options:
+  -i, --interactive  Runs the project:package command in interactive mode.
+  -h, --help         Displays help for the command.

@@ -1,0 +1,7 @@
+.tools/
+.sandbox/
+/target/
+*.log
+.DS_Store
+tests/fixtures/generated.luau
+tests/smoke/.generated/

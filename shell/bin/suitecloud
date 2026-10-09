@@ -1,0 +1,18 @@
+#!/bin/sh
+# TERN_NETSUITE_GUARD_SHIM (marker: the guard core skips any `suitecloud` on
+# PATH containing it when it looks for the real CLI).
+#
+# PATH shim for the tern-netsuite guard. With this directory first on PATH
+# (TERN_NETSUITE_GUARD=shim before sourcing shell/tern-netsuite.<shell>),
+# every process that runs `suitecloud` by name goes through the guard,
+# including npm/bun scripts and other wrappers that cannot see shell
+# functions. Keep it in the repository's shell/bin: it finds the guard core
+# one directory up.
+
+tns_core=$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)/tern-netsuite-guard
+if [ ! -x "$tns_core" ]; then
+	printf 'tern-netsuite guard: the guard core %s is missing, so suitecloud was not run.\n' "$tns_core" >&2
+	printf 'tern-netsuite guard: restore it or remove %s from PATH.\n' "$(dirname -- "$0")" >&2
+	exit 127
+fi
+exec "$tns_core" shim "$@"

@@ -1,0 +1,119 @@
+<customrecordtype scriptid="customrecord_demo_sprint">
+  <recordname>Sprint</recordname>
+  <description>Planning container for a warehouse-scoped fulfillment sprint.</description>
+  <accesstype>NONENEEDED</accesstype>
+  <allowattachments>T</allowattachments>
+  <allowquicksearch>T</allowquicksearch>
+  <allowuiaccess>T</allowuiaccess>
+
+  <enableoptimisticlocking>T</enableoptimisticlocking>
+  <enablesystemnotes>T</enablesystemnotes>
+  <hierarchical>F</hierarchical>
+  <includeinsearchmenu>T</includeinsearchmenu>
+  <includename>T</includename>
+  <isinactive>F</isinactive>
+  <showid>T</showid>
+  <shownotes>T</shownotes>
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_warehouse">
+      <fieldtype>SELECT</fieldtype>
+      <label>Warehouse</label>
+      <description>Warehouse this sprint plans for</description>
+      <selectrecordtype>[scriptid=customrecord_cseg_acme_warehouse]</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_status">
+      <fieldtype>SELECT</fieldtype>
+      <label>Status</label>
+      <selectrecordtype>[scriptid=customlist_demo_sprint_status]</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_start_date">
+      <fieldtype>DATE</fieldtype>
+      <label>Start Date</label>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_due_date">
+      <fieldtype>DATE</fieldtype>
+      <label>Due Date</label>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_goal">
+      <fieldtype>TEXTAREA</fieldtype>
+      <label>Goal</label>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_links">
+      <fieldtype>TEXTAREA</fieldtype>
+      <label>Links</label>
+      <description>JSON array of {label, url} link objects attached to this sprint</description>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_priority">
+      <fieldtype>SELECT</fieldtype>
+      <label>Priority</label>
+      <description>Planning priority for this sprint</description>
+      <selectrecordtype>[scriptid=customlist_demo_sprint_priority]</selectrecordtype>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_sales_order">
+      <fieldtype>SELECT</fieldtype>
+      <label>Sales Order</label>
+      <description>Optional sales order linked directly to this sprint</description>
+      <selectrecordtype>-30</selectrecordtype>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_sales_orders">
+      <fieldtype>MULTISELECT</fieldtype>
+      <label>Sales Orders</label>
+      <description>Sales orders linked directly to this sprint. Supersedes the singular Sales Order field.</description>
+      <selectrecordtype>-30</selectrecordtype>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sprint_transfer_orders">
+      <fieldtype>MULTISELECT</fieldtype>
+      <label>Transfer Orders</label>
+      <description>Transfer orders supplying material for this sprint.</description>
+      <selectrecordtype>-30</selectrecordtype>
+      <ismandatory>F</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>

@@ -1,0 +1,24 @@
+<customlist scriptid="customlist_demo_sprint_priority">
+  <name>Demo - Sprint Priority</name>
+  <description>Priority level for fulfillment planning sprints</description>
+  <isinactive>F</isinactive>
+  <isordered>T</isordered>
+  <customvalues>
+    <customvalue scriptid="demo_sp_highest">
+      <value>Highest</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+    <customvalue scriptid="demo_sp_high">
+      <value>High</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+    <customvalue scriptid="demo_sp_medium">
+      <value>Medium</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+    <customvalue scriptid="demo_sp_low">
+      <value>Low</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+  </customvalues>
+</customlist>

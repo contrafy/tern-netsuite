@@ -1,0 +1,15 @@
+<usereventscript scriptid="customscript_demo_util_filedetection">
+  <aftersubmitfunction></aftersubmitfunction>
+  <beforeloadfunction>ID001_transactionFileDetection</beforeloadfunction>
+  <beforesubmitfunction></beforesubmitfunction>
+  <description>2023-08-01: Deprecated in favor of script Demo UTIL Base Record (UE). To activate, set the corresponding parameter in that script to true.&#xd;
+&#xd;
+Activate on all records to detect if there are files attached.</description>
+  <isinactive>F</isinactive>
+  <name>Demo UTIL File Detection (DEPRECATED)</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <notifyuser>F</notifyuser>
+  <scriptfile>[/SuiteBundles/Bundle 100001/Demo_FileDetection.js]</scriptfile>
+</usereventscript>

@@ -1,0 +1,84 @@
+schema = 1
+id = "tern-netsuite"
+name = "Tern NetSuite"
+version = "0.1.0"
+description = "NetSuite for Tern: native SuiteCloud SDF CLI views (validate, deploy, auth), a production deploy guard and account status, plus read-only SuiteQL, execution logs and account health."
+icon = "cloud"
+host = "plugin/host.luau"
+window = "plugin/window.luau"
+styles = []
+
+[[blocks]]
+id = "doctor"
+title = "NetSuite Doctor"
+icon = "cloud"
+
+[[blocks]]
+id = "connect"
+title = "NetSuite Connect"
+icon = "cloud"
+
+[[blocks]]
+id = "approve"
+title = "NetSuite Approve"
+icon = "shield"
+palette = false
+
+[[blocks]]
+id = "scaffold"
+title = "New SuiteScript"
+icon = "cloud"
+
+[[blocks]]
+id = "health"
+title = "NetSuite Health"
+icon = "activity"
+
+[[blocks]]
+id = "logs"
+title = "NetSuite Logs"
+icon = "cloud"
+
+[[blocks]]
+id = "explorer"
+title = "SDF Explorer"
+icon = "cloud"
+
+[[blocks]]
+id = "history"
+title = "Deploy history"
+icon = "cloud"
+
+[[blocks]]
+id = "browser"
+title = "NetSuite Browser"
+icon = "cloud"
+
+# Globs see the program basename plus its args after Tern strips `npx` and its
+# options, `VAR=` prefixes, `command` and directories, so no `npx` forms are
+# needed. The lens re-derives the command from argv and shows raw output for
+# anything it cannot render. `scripts/tern-netsuite-wrappers` fills the marked
+# region from the config's `lens.wrappers`; it ships empty.
+[[lenses]]
+id = "suitecloud"
+match = [
+	"suitecloud project:validate",
+	"suitecloud project:validate *",
+	"suitecloud project:deploy",
+	"suitecloud project:deploy *",
+	"suitecloud file:upload",
+	"suitecloud file:upload *",
+	"suitecloud project:package",
+	"suitecloud project:package *",
+	"suitecloud project:adddependencies",
+	"suitecloud project:adddependencies *",
+	"suitecloud account:manageauth *",
+	"suitecloud object:list",
+	"suitecloud object:list *",
+	"suitecloud file:list",
+	"suitecloud file:list *",
+	"suitecloud-cli *",
+	"suitecloud-cli@* *",
+	# BEGIN tern-netsuite wrappers
+	# END tern-netsuite wrappers
+]

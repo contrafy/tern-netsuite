@@ -1,0 +1,27 @@
+Deploying to 1234567 - Example Co - Administrator.
+2026-10-09 00:12:03 (PDT) Installation started
+Info -- Account [(PRODUCTION) Example Co]
+Info -- Account Customization Project [tns-demo]
+Info -- Framework Version [1.0]
+Validate manifest -- Success
+Validate deploy file -- Success
+Validate configuration -- Success
+Validate objects -- Success
+Validate files -- Success
+Validate folders -- Success
+Validate translation imports -- Success
+Validation of referenceability from custom objects to translations collection strings in progress. -- Success
+Validate preferences -- Success
+Validate flags -- Success
+Validate account settings -- Success
+Validate Custom Objects against the Account -- Success
+Validate file cabinet items against the account -- Success
+Validate translation imports against the account -- Success
+Validation of references to translation collection strings against account in progress. -- Success
+Begin deployment
+Upload file -- ~/FileCabinet/SuiteScripts/tns_demo.js
+Update object -- customscript_tns_demo (restlet)
+Update object -- customscript_tns_demo.customdeploy_tns_demo (scriptdeployment)
+Create object -- customrecord_tns_demo (customrecordtype)
+2026-10-09 00:12:21 (PDT) Installation COMPLETE (0 minutes 18 seconds)
+The deployment process has finished successfully.

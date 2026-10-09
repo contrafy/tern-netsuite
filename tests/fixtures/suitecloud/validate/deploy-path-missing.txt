@@ -1,0 +1,4 @@
+The validation process has encountered an error.
+The following errors were found during local validation:
+Errors for file: /work/proj/deploypath/src/deploy.xml.
+  - Line No. 3 - Error message: The file "~/FileCabinet/SuiteScripts/nope.js" referenced by object field "path" is missing.

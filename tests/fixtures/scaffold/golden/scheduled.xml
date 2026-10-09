@@ -1,0 +1,17 @@
+<scheduledscript scriptid="customscript_demo_scheduled">
+  <description></description>
+  <isinactive>F</isinactive>
+  <name>Demo Scheduled</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <scriptfile>[/SuiteScripts/demo/demo_scheduled.js]</scriptfile>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_demo_scheduled">
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+      <status>NOTSCHEDULED</status>
+      <title>Demo Scheduled</title>
+    </scriptdeployment>
+  </scriptdeployments>
+</scheduledscript>

@@ -1,0 +1,24 @@
+The deployment process has encountered an error.
+Deploying to 1234567_SB1 - Example Co - Administrator.
+2026-10-09 00:12:03 (PDT) Installation started
+Info -- Account [(SANDBOX) Example Co]
+Info -- Account Customization Project [tns-demo]
+Info -- Framework Version [1.0]
+Validate manifest -- Success
+Validate deploy file -- Success
+Validate configuration -- Success
+Validate objects -- Failed
+Validate files -- Success
+Validate folders -- Success
+Validate translation imports -- Success
+Validation of referenceability from custom objects to translations collection strings in progress. -- Success
+Validate preferences -- Success
+Validate flags -- Success
+Validate for circular dependencies -- Success
+*** ERROR ***
+
+Validation failed.
+
+An error occurred during custom object validation. (customscript_tns_demo)
+Details: The file reference /SuiteScripts/tns_missing.js is missing in the project and also not included in the dependencies list.
+File: ~/Objects/customscript_tns_demo.xml

@@ -1,0 +1,29 @@
+Usage: suitecloud project:validate [options]
+
+Validates the folder containing the SuiteCloud project.
+
+Options:
+  --accountspecificvalues <argument>  Indicates how to handle the presence of
+                                      account-specific values in an account
+                                      customization project. If there are
+                                      account-specific values in the project,
+                                      enter WARNING to continue with the
+                                      deployment process, or ERROR to stop it.
+                                      If the option is not specified, the
+                                      default value is ERROR. It only applies
+                                      to account customization projects.
+  -a, --applyinstallprefs             Applies the settings from the hiding.xml,
+                                      locking.xml, and overwriting.xml files.
+                                      It only applies to SuiteApps.
+  -i, --interactive                   Runs the project:validate command in
+                                      interactive mode.
+  --log <argument>                    Sets the validation log file location, as
+                                      either a directory or a file name. If it
+                                      is a directory, a default log file is
+                                      generated in the specified location. If a
+                                      log file already exists in the specified
+                                      location, validation log details are
+                                      appended to that existing file.
+  --server                            Indicates that the server will perform
+                                      the validation.
+  -h, --help                          Displays help for the command.

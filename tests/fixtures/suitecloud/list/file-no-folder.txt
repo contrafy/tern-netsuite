@@ -1,0 +1,4 @@
+There are validation errors:
+"folder" option is mandatory.
+
+You can use the interactive mode by running "suitecloud file:list -i"

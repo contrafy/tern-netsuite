@@ -1,0 +1,6 @@
+Usage: suitecloud project:adddependencies [options]
+
+Adds the missing dependencies to the manifest file.
+
+Options:
+  -h, --help  Displays help for the command.

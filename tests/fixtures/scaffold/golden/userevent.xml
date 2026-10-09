@@ -1,0 +1,19 @@
+<usereventscript scriptid="customscript_demo_userevent">
+  <description></description>
+  <isinactive>F</isinactive>
+  <name>Demo User Event</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <notifyuser>F</notifyuser>
+  <scriptfile>[/SuiteScripts/demo/demo_userevent.js]</scriptfile>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_demo_userevent">
+      <allroles>T</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+      <recordtype>SALESORDER</recordtype>
+      <status>TESTING</status>
+    </scriptdeployment>
+  </scriptdeployments>
+</usereventscript>

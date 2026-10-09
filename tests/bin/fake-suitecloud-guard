@@ -1,0 +1,37 @@
+#!/bin/sh
+# Fake SuiteCloud CLI for the guard tests and the real-Tern guard check. It
+# never contacts NetSuite: it records what would have run. Install it as
+# `suitecloud` (symlink) first on PATH. State lives in $FAKE_DIR:
+#   auth-<authId>   `account:manageauth --info <authId>` prints this account
+#                   as the real CLI 3.2.0 does: line 1 account id, line 2
+#                   account type (default Production), line 3 account name
+#                   (default Example Co); missing = "not available", exit 1
+#   exit            exit status of every other invocation (default 0)
+# `--info` calls are appended to info-calls (authId and cwd). Every other
+# invocation n is recorded as call-n (argv, NUL-separated) and cwd-n, with
+# stdin copied to stdin-n when $FAKE_READ_STDIN is 1.
+d=${FAKE_DIR:?FAKE_DIR is required}
+
+if [ $# = 3 ] && [ "$1" = account:manageauth ] && [ "$2" = --info ]; then
+	printf '%s %s\n' "$3" "$(pwd -P)" >>"$d/info-calls"
+	f=$d/auth-$3
+	if [ ! -f "$f" ]; then
+		echo "The \"$3\" authentication ID is not available. Check your authentication credentials and try again."
+		exit 1
+	fi
+	acct=$(sed -n 1p "$f")
+	type=$(sed -n 2p "$f")
+	name=$(sed -n 3p "$f")
+	printf 'Authentication ID: %s\nAccount Name: %s\nAccount ID: %s\nRole: Administrator\nDomain: %s.app.netsuite.com\nAccount Type: %s\n' \
+		"$3" "${name:-Example Co}" "$acct" "$(printf '%s' "$acct" | tr '_[:upper:]' '-[:lower:]')" "${type:-Production}"
+	exit 0
+fi
+
+n=$(($(cat "$d/calls" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$d/calls"
+printf '%s\0' "$@" >"$d/call-$n"
+pwd -P >"$d/cwd-$n"
+if [ "${FAKE_READ_STDIN-}" = 1 ]; then
+	cat >"$d/stdin-$n"
+fi
+exit "$(cat "$d/exit" 2>/dev/null || echo 0)"

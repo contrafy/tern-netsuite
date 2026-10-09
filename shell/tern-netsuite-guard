@@ -1,0 +1,835 @@
+#!/bin/sh
+# tern-netsuite-guard: approval gate for SuiteCloud CLI commands that write to
+# a production NetSuite account, for Tern panes.
+#
+#   tern-netsuite-guard suitecloud [ARGS...]   run suitecloud; a guarded command
+#                                              (project:deploy, file:upload by
+#                                              default) aimed at a production or
+#                                              unknown account waits for approval
+#                                              in Tern first
+#   tern-netsuite-guard shim [ARGS...]         the same, called by the PATH shim
+#                                              shell/bin/suitecloud
+#   tern-netsuite-guard status                 print what the guard would do here
+#
+# Normally reached through the `suitecloud` function that shell/tern-netsuite.zsh,
+# .bash or .fish define, or through the PATH shim. The request/response
+# protocol is specified in shell/PROTOCOL.md and the fingerprint is also
+# implemented by plugin/lib/guard/request.luau; keep all three in sync.
+
+tng_shim_marker=TERN_NETSUITE_GUARD_SHIM
+tng_default_commands='project:deploy file:upload'
+
+tng_err() {
+	printf 'tern-netsuite guard: %s\n' "$*" >&2
+}
+
+tng_cleanup() {
+	[ -n "${tng_work-}" ] && rm -rf "$tng_work"
+	[ -n "${tng_req-}" ] && rm -f "$tng_req"
+	[ -n "${tng_resp-}" ] && rm -f "$tng_resp"
+	return 0
+}
+
+tng_bypass_hint() {
+	if [ "$tng_via" = shim ]; then
+		tng_err "nothing was executed. To run it anyway, without confirmation, call the CLI directly: ${tng_program:-/path/to/suitecloud} ..."
+	else
+		tng_err "nothing was executed. To run it anyway, without confirmation, use: command suitecloud ..."
+	fi
+}
+
+# Every refusal ends here: nothing has been executed, nothing will be.
+tng_refuse() {
+	tng_err "$@"
+	tng_bypass_hint
+	tng_cleanup
+	exit 1
+}
+
+tng_note() {
+	tng_notes="$tng_notes$1
+"
+}
+
+# The real CLI: $TNS_SUITECLOUD, else the first `suitecloud` on PATH that is
+# not the PATH shim (recognised by its marker line, so a copied or symlinked
+# shim cannot make the guard call itself).
+tng_find_program() {
+	tng_program=
+	if [ -n "${TNS_SUITECLOUD-}" ]; then
+		case $TNS_SUITECLOUD in
+		/*) ;;
+		*)
+			tng_err "TNS_SUITECLOUD must be an absolute path: $TNS_SUITECLOUD"
+			return 1
+			;;
+		esac
+		[ -x "$TNS_SUITECLOUD" ] && [ ! -d "$TNS_SUITECLOUD" ] || {
+			tng_err "TNS_SUITECLOUD is not an executable file: $TNS_SUITECLOUD"
+			return 1
+		}
+		tng_program=$TNS_SUITECLOUD
+		return 0
+	fi
+	tng_ifs=$IFS
+	IFS=:
+	set -f
+	for tng_d in $PATH; do
+		[ -n "$tng_d" ] || tng_d=.
+		tng_c=$tng_d/suitecloud
+		[ -x "$tng_c" ] && [ ! -d "$tng_c" ] || continue
+		grep -q "$tng_shim_marker" "$tng_c" 2>/dev/null && continue
+		tng_program=$tng_c
+		break
+	done
+	set +f
+	IFS=$tng_ifs
+	if [ -z "$tng_program" ]; then
+		tng_err "suitecloud (the SuiteCloud CLI) is not on PATH, so nothing was run."
+		return 1
+	fi
+	case $tng_program in
+	/*) ;;
+	*) tng_program=$(pwd -P)/$tng_program ;;
+	esac
+	return 0
+}
+
+# Finds the command (the first word that is not an option: the CLI's global
+# options take no value) and whether the invocation only prints help or is a
+# deploy dry run. A flag counts only when the word before it cannot be an
+# option expecting a value, so `--log --dryrun` is never taken for a dry run.
+tng_scan() {
+	tng_cmd=
+	tng_help=
+	tng_dry=
+	tng_authflag=
+	tng_open=
+	tng_dd=
+	for tng_t in "$@"; do
+		if [ -z "$tng_cmd" ]; then
+			case $tng_t in
+			-h | --help) tng_help=1 ;;
+			-*) ;;
+			*) tng_cmd=$tng_t ;;
+			esac
+			continue
+		fi
+		[ -n "$tng_dd" ] && continue
+		case $tng_t in
+		--authid | --authid=*) tng_authflag=1 ;;
+		esac
+		case $tng_t in
+		--) tng_dd=1 ;;
+		-h | --help) [ -z "$tng_open" ] && tng_help=1 ;;
+		--dryrun) [ -z "$tng_open" ] && tng_dry=1 ;;
+		esac
+		case $tng_t in
+		-a | --applyinstallprefs | -i | --interactive | --validate | --dryrun | -h | --help | --*=*) tng_open= ;;
+		-*) tng_open=1 ;;
+		*) tng_open= ;;
+		esac
+	done
+}
+
+tng_is_guarded() {
+	[ -n "$tng_cmd" ] || return 1
+	case " ${TNS_GUARD_COMMANDS-$tng_default_commands} " in
+	*" $tng_cmd "*) return 0 ;;
+	esac
+	return 1
+}
+
+tng_sha_tool() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		tng_sha=sha256sum
+	elif command -v shasum >/dev/null 2>&1; then
+		tng_sha='shasum -a 256'
+	else
+		tng_refuse "neither sha256sum nor shasum is available to fingerprint the request."
+	fi
+}
+
+tng_len() {
+	tng_l=$(printf '%s' "$1" | wc -c)
+	tng_l=$((tng_l + 0))
+}
+
+tng_canon_field() {
+	tng_len "$2"
+	printf '%s %s:%s\n' "$1" "$tng_l" "$2"
+}
+
+# Sets tng_auth to project.json's defaultAuthId only when a line-based read
+# provably agrees with the CLI's JSON.parse; else tng_auth stays empty (an
+# unknown target) and tng_auth_issue says why. JSON.parse keeps the last of
+# duplicate keys and decodes \uXXXX escapes in keys and values, so a file
+# with any backslash or more than one "defaultAuthId" is ambiguous.
+tng_read_auth() {
+	if grep -qF '\' "$1"; then
+		tng_auth_issue="contains a backslash (a JSON escape)"
+		return 0
+	fi
+	tng_n=$(awk '{ n += gsub(/"defaultAuthId"/, "") } END { print n + 0 }' "$1")
+	if [ "$tng_n" -gt 1 ]; then
+		tng_auth_issue="names defaultAuthId $tng_n times"
+		return 0
+	fi
+	tng_auth=$(sed -n 's/.*"defaultAuthId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | sed -n 1p)
+	case $tng_auth in
+	*[!A-Za-z0-9._-]*)
+		tng_auth=
+		tng_auth_issue="has a defaultAuthId that is not a plain [A-Za-z0-9._-] name"
+		;;
+	esac
+	return 0
+}
+
+# The project the CLI will use: exactly the working directory (the CLI reads
+# project.json and suitecloud.config.js from there, never from a parent).
+tng_project() {
+	tng_cwd=$(pwd -P) || tng_refuse "cannot determine the working directory."
+	tng_auth=
+	tng_auth_issue=
+	if [ -f "$tng_cwd/project.json" ]; then
+		tng_read_auth "$tng_cwd/project.json"
+	fi
+	tng_pf=
+	if [ -f "$tng_cwd/suitecloud.config.js" ]; then
+		tng_pf=$(sed -n "s/.*defaultProjectFolder[[:space:]]*:[[:space:]]*[\"'\`]\\([^\"'\`]*\\)[\"'\`].*/\\1/p" "$tng_cwd/suitecloud.config.js" | sed -n 1p)
+	fi
+	tng_pf=${tng_pf#./}
+	while :; do
+		case $tng_pf in
+		*/) tng_pf=${tng_pf%/} ;;
+		*) break ;;
+		esac
+	done
+	case $tng_pf in
+	'' | .) tng_folder=$tng_cwd ;;
+	/*) tng_folder=$tng_pf ;;
+	*) tng_folder=$tng_cwd/$tng_pf ;;
+	esac
+}
+
+# Notes about the project that the approver should see.
+tng_project_notes() {
+	if [ ! -f "$tng_cwd/project.json" ]; then
+		tng_note "no project.json in $tng_cwd: the target account is unknown."
+	elif [ -n "$tng_auth_issue" ]; then
+		tng_note "project.json $tng_auth_issue, so the guard cannot tell which defaultAuthId the CLI uses: the target account is unknown."
+	elif [ -z "$tng_auth" ]; then
+		tng_note "project.json has no readable defaultAuthId: the target account is unknown."
+	fi
+	if [ -n "$tng_authflag" ]; then
+		tng_note "--authid is not an option of this SuiteCloud CLI command (the target is project.json's defaultAuthId); treated as an unknown target."
+	fi
+	if [ -f "$tng_cwd/suitecloud.config.js" ]; then
+		grep -q beforeExecuting "$tng_cwd/suitecloud.config.js" 2>/dev/null &&
+			tng_note "suitecloud.config.js defines a beforeExecuting hook: it runs first and can change the command's arguments."
+		grep -Eq '(^|[^A-Za-z])projectFolder' "$tng_cwd/suitecloud.config.js" 2>/dev/null &&
+			tng_note "suitecloud.config.js sets a per-command projectFolder; the guard fingerprints $tng_folder."
+	fi
+	return 0
+}
+
+# Resolves the auth ID to an account with the CLI itself (run from / so no
+# project config is loaded): sets tng_acct (empty when unknown), tng_acct_name
+# and tng_acct_type.
+tng_resolve_account() {
+	tng_acct=
+	tng_acct_name=
+	tng_acct_type=
+	[ -n "$tng_auth" ] && [ -z "$tng_authflag" ] || return 0
+	if ! tng_info=$(cd / && "$tng_program" account:manageauth --info "$tng_auth" </dev/null 2>&1); then
+		tng_note "suitecloud account:manageauth --info $tng_auth failed: the target account is unknown."
+		return 0
+	fi
+	tng_field_of() {
+		printf '%s\n' "$tng_info" | tr -d '\r' | sed -n "s/^$1:[[:space:]]*//p" | sed -n 1p | sed 's/[[:space:]]*$//'
+	}
+	tng_acct=$(tng_field_of 'Account ID')
+	tng_acct_name=$(tng_field_of 'Account Name')
+	tng_acct_type=$(tng_field_of 'Account Type')
+	case $tng_acct in
+	'' | *[!A-Za-z0-9_-]*)
+		tng_note "suitecloud account:manageauth --info $tng_auth printed no usable Account ID: the target account is unknown."
+		tng_acct=
+		;;
+	esac
+}
+
+# Mirrors plugin/lib/account/classify.luau: configured accounts win
+# ($TNS_GUARD_ACCOUNTS, "ID=prod|nonprod ..."), then _SB<digits>,
+# _RP[<digits>] and TSTDRV<digits> ids are non-production; everything else,
+# a bare _SB or TSTDRV and unknown included, is production. Sets tng_prod
+# to 1 or 0.
+tng_classify() {
+	tng_prod=1
+	[ -n "$tng_acct" ] || return 0
+	tng_up=$(printf '%s' "$tng_acct" | tr '[:lower:]' '[:upper:]')
+	set -f
+	for tng_e in ${TNS_GUARD_ACCOUNTS-}; do
+		[ "${tng_e%%=*}" = "$tng_up" ] || continue
+		case ${tng_e#*=} in
+		prod)
+			set +f
+			return 0
+			;;
+		nonprod)
+			tng_prod=0
+			set +f
+			return 0
+			;;
+		esac
+	done
+	set +f
+	tng_digits=${tng_up##*[!0-9]}
+	tng_stem=${tng_up%"$tng_digits"}
+	case $tng_stem in
+	*_SB) [ -n "$tng_digits" ] && tng_prod=0 ;;
+	*_RP) tng_prod=0 ;;
+	TSTDRV) [ -n "$tng_digits" ] && tng_prod=0 ;;
+	esac
+	return 0
+}
+
+tng_target_label() {
+	if [ -n "$tng_acct" ]; then
+		tng_label="account $tng_acct${tng_acct_name:+ ($tng_acct_name)}"
+	elif [ -n "$tng_auth" ]; then
+		tng_label="an unknown account (auth ID $tng_auth)"
+	else
+		tng_label="an unknown account"
+	fi
+}
+
+# Appends the regular files under $1 (following symlinks, as the CLI does when
+# it zips the project) to paths.raw; $2 restricts them to a find -path glob.
+tng_find_files() {
+	if [ ! -d "$1" ]; then
+		tng_note "deploy.xml lists ${2:-$1}, which does not exist."
+		return 0
+	fi
+	if [ -n "$(find -L "$1" -name '*
+*' 2>/dev/null | sed -n 1p)" ]; then
+		tng_refuse "a file name under $1 contains a newline; the guard cannot fingerprint it."
+	fi
+	if [ -n "${2-}" ]; then
+		find -L "$1" -type f -path "$2" 2>/dev/null
+	else
+		find -L "$1" -type f 2>/dev/null
+	fi >>"$tng_work/paths.raw"
+	return 0
+}
+
+# Files a project:deploy sends: deploy.xml, manifest.xml and every <path>
+# entry of deploy.xml (`~/` is the project folder; `dir/*` is everything
+# under dir; any other `*` is matched with find -path, which may over-match).
+tng_list_deploy() {
+	tng_dx=$tng_folder/deploy.xml
+	if [ ! -f "$tng_dx" ]; then
+		tng_note "no deploy.xml in $tng_folder; every file of the project folder is fingerprinted."
+		tng_find_files "$tng_folder"
+		return 0
+	fi
+	printf '%s\n' "$tng_dx" >>"$tng_work/paths.raw"
+	[ -f "$tng_folder/manifest.xml" ] && printf '%s\n' "$tng_folder/manifest.xml" >>"$tng_work/paths.raw"
+	tr '<' '\n' <"$tng_dx" | sed -n 's/^path>[[:space:]]*//p' | sed 's/[[:space:]]*$//' >"$tng_work/patterns"
+	while IFS= read -r tng_p; do
+		case $tng_p in
+		'~/'*) tng_p=${tng_p#'~/'} ;;
+		*)
+			tng_note "deploy.xml path '$tng_p' does not start with ~/ and is not fingerprinted."
+			continue
+			;;
+		esac
+		case $tng_p in
+		'*') tng_find_files "$tng_folder" ;;
+		*/'*') tng_find_files "$tng_folder/${tng_p%/\*}" ;;
+		*'*'*) tng_find_files "$tng_folder" "$tng_folder/$tng_p" ;;
+		*)
+			if [ -d "$tng_folder/$tng_p" ]; then
+				tng_find_files "$tng_folder/$tng_p"
+			elif [ -f "$tng_folder/$tng_p" ]; then
+				printf '%s\n' "$tng_folder/$tng_p" >>"$tng_work/paths.raw"
+			else
+				tng_note "deploy.xml lists ~/$tng_p, which does not exist."
+			fi
+			;;
+		esac
+	done <"$tng_work/patterns"
+	return 0
+}
+
+tng_add_upload() {
+	tng_ifs=$IFS
+	IFS=' 	'
+	set -f
+	for tng_v in $1; do
+		case $tng_v in
+		/*) tng_f=$tng_folder/FileCabinet$tng_v ;;
+		*) tng_f=$tng_folder/FileCabinet/$tng_v ;;
+		esac
+		if [ -f "$tng_f" ]; then
+			printf '%s\n' "$tng_f" >>"$tng_work/paths.raw"
+			tng_up_any=1
+		else
+			tng_note "file:upload path $tng_v is not a file at $tng_f."
+		fi
+	done
+	set +f
+	IFS=$tng_ifs
+}
+
+# Files a file:upload sends: each --paths value (space-separated File
+# Cabinet paths) under <project folder>/FileCabinet.
+tng_list_upload() {
+	tng_up_any=
+	tng_in=
+	tng_seen=
+	tng_dd=
+	for tng_t in "$@"; do
+		if [ -z "$tng_seen" ]; then
+			[ "$tng_t" = "$tng_cmd" ] && tng_seen=1
+			continue
+		fi
+		[ -n "$tng_dd" ] && continue
+		case $tng_t in
+		--)
+			tng_dd=1
+			tng_in=
+			;;
+		--paths) tng_in=1 ;;
+		--paths=*)
+			tng_add_upload "${tng_t#--paths=}"
+			tng_in=1
+			;;
+		-*) tng_in= ;;
+		*) [ -n "$tng_in" ] && tng_add_upload "$tng_t" ;;
+		esac
+	done
+	[ -n "$tng_up_any" ] ||
+		tng_note "no uploadable --paths: the files are chosen interactively by the CLI and are not fingerprinted."
+	return 0
+}
+
+# Writes the sorted, de-duplicated absolute paths to fingerprint to $tng_work/paths.
+tng_list_files() {
+	: >"$tng_work/paths.raw"
+	for tng_f in "$tng_cwd/project.json" "$tng_cwd/suitecloud.config.js"; do
+		[ -f "$tng_f" ] && printf '%s\n' "$tng_f" >>"$tng_work/paths.raw"
+	done
+	case $tng_cmd in
+	project:deploy) tng_list_deploy ;;
+	file:upload) tng_list_upload "$@" ;;
+	*) tng_note "$tng_cmd is guarded by configuration; only project.json and suitecloud.config.js are fingerprinted." ;;
+	esac
+	if LC_ALL=C grep -q '[[:cntrl:]]' "$tng_work/paths.raw" || grep -qF '\' "$tng_work/paths.raw"; then
+		tng_refuse "a project file name contains a control character or a backslash; the guard cannot fingerprint it."
+	fi
+	LC_ALL=C sort -u "$tng_work/paths.raw" >"$tng_work/paths"
+}
+
+# Fresh fingerprint of the invocation ("$@" = the argv, starting with
+# `suitecloud`): sets tng_fp and tng_nfiles, writes the canonical file lines
+# to $tng_work/canon-files and the request's file entries to $tng_work/files.json.
+tng_compute() {
+	tng_list_files "$@"
+	: >"$tng_work/sums"
+	if [ -s "$tng_work/paths" ]; then
+		tr '\n' '\0' <"$tng_work/paths" | xargs -0 $tng_sha >"$tng_work/sums" 2>/dev/null ||
+			tng_refuse "cannot hash the project files (unreadable or vanished file)."
+	fi
+	LC_ALL=C awk -v canon="$tng_work/canon-files" -v js="$tng_work/files.json" '
+		{
+			h = substr($0, 1, 64); sep = substr($0, 65, 2); p = substr($0, 67)
+			if (length(h) != 64 || h ~ /[^0-9a-f]/ || (sep != "  " && sep != " *") || p == "") exit 1
+			printf "%d:%s %s\n", length(p), p, h > canon
+			q = p; gsub(/"/, "\\\"", q)
+			printf "%s{\"path\":\"%s\",\"sha256\":\"%s\"}", (NR > 1 ? "," : ""), q, h > js
+		}
+		END { printf "" > canon; printf "" > js }' "$tng_work/sums" ||
+		tng_refuse "unexpected digest output while fingerprinting the project files."
+	tng_nfiles=$(wc -l <"$tng_work/canon-files" | tr -d ' ')
+	{
+		printf 'tern-netsuite/fp/v1\n'
+		printf 'argv %s\n' "$#"
+		for tng_t in "$@"; do
+			tng_len "$tng_t"
+			printf '%s:%s\n' "$tng_l" "$tng_t"
+		done
+		tng_canon_field cwd "$tng_cwd"
+		tng_canon_field folder "$tng_folder"
+		if [ -n "$tng_auth" ]; then tng_canon_field authid "$tng_auth"; else printf 'authid -\n'; fi
+		if [ -n "$tng_acct" ]; then tng_canon_field account "$tng_acct"; else printf 'account -\n'; fi
+		printf 'files %s\n' "$tng_nfiles"
+		cat "$tng_work/canon-files"
+	} >"$tng_work/canon"
+	tng_fp=$($tng_sha <"$tng_work/canon") || tng_refuse "cannot hash the request."
+	tng_fp=${tng_fp%%[!0-9a-f]*}
+	[ ${#tng_fp} = 64 ] || tng_refuse "unexpected digest of the request."
+}
+
+# JSON string literal of $1: escapes quote, backslash and control bytes;
+# other bytes (UTF-8 included) pass through unchanged.
+tng_json() {
+	tng_fmt=$(printf '%s' "$1" | od -An -v -tu1 | awk '
+		BEGIN { for (i = 0; i < 32; i++) esc[i] = sprintf("\\\\u%04x", i)
+			esc[8] = "\\\\b"; esc[9] = "\\\\t"; esc[10] = "\\\\n"; esc[12] = "\\\\f"; esc[13] = "\\\\r" }
+		{ for (i = 1; i <= NF; i++) {
+			d = $i + 0
+			if (d in esc) s = esc[d]
+			else if (d == 34) s = "\\\\\""
+			else if (d == 92) s = "\\\\\\\\"
+			else if (d == 37) s = "%%"
+			else s = sprintf("\\%03o", d)
+			printf "%s", s
+		} }')
+	printf '"'
+	# shellcheck disable=SC2059
+	printf "$tng_fmt"
+	printf '"'
+}
+
+tng_json_or_null() {
+	if [ -n "$1" ]; then tng_json "$1"; else printf null; fi
+}
+
+tng_int_or_null() {
+	case $1 in
+	'' | *[!0-9]*) printf null ;;
+	*) printf '%s' "$1" ;;
+	esac
+}
+
+tng_git() {
+	git -C "$tng_cwd" "$@" </dev/null 2>/dev/null
+}
+
+# Git state of the project's repository, as a JSON object (or null). Read
+# only: no fetch, so ahead/behind are against the last fetched upstream.
+tng_git_json() {
+	command -v git >/dev/null 2>&1 || {
+		printf null
+		return 0
+	}
+	tng_groot=$(tng_git rev-parse --show-toplevel) || {
+		printf null
+		return 0
+	}
+	tng_gbranch=$(tng_git symbolic-ref -q --short HEAD) || tng_gbranch=
+	tng_ghead=$(tng_git rev-parse -q --verify HEAD) || tng_ghead=
+	if [ -n "$(tng_git status --porcelain | sed -n 1p)" ]; then tng_gdirty=true; else tng_gdirty=false; fi
+	tng_gup=$(tng_git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}') || tng_gup=
+	tng_gahead=
+	tng_gbehind=
+	if [ -n "$tng_gup" ]; then
+		tng_gcounts=$(tng_git rev-list --left-right --count '@{upstream}...HEAD') || tng_gcounts=
+		tng_gbehind=$(printf '%s' "$tng_gcounts" | awk '{ print $1 }')
+		tng_gahead=$(printf '%s' "$tng_gcounts" | awk '{ print $2 }')
+	fi
+	tng_gdefault=$(tng_git symbolic-ref -q --short refs/remotes/origin/HEAD) || tng_gdefault=
+	tng_gdefault=${tng_gdefault#origin/}
+	if [ -z "$tng_gdefault" ]; then
+		for tng_b in main master; do
+			if tng_git show-ref -q --verify "refs/heads/$tng_b"; then
+				tng_gdefault=$tng_b
+				break
+			fi
+		done
+	fi
+	printf '{"root":'
+	tng_json "$tng_groot"
+	printf ',"branch":'
+	tng_json_or_null "$tng_gbranch"
+	printf ',"head":'
+	tng_json_or_null "$tng_ghead"
+	printf ',"dirty":%s,"upstream":' "$tng_gdirty"
+	tng_json_or_null "$tng_gup"
+	printf ',"ahead":%s,"behind":%s,"default_branch":' "$(tng_int_or_null "$tng_gahead")" "$(tng_int_or_null "$tng_gbehind")"
+	tng_json_or_null "$tng_gdefault"
+	printf '}'
+}
+
+tng_write_request() {
+	{
+		printf '{"version":1,"nonce":"%s","argv":[' "$tng_nonce"
+		tng_sep=
+		for tng_t in "$@"; do
+			printf '%s' "$tng_sep"
+			tng_json "$tng_t"
+			tng_sep=,
+		done
+		printf '],"command":'
+		tng_json "$tng_cmd"
+		printf ',"program":'
+		tng_json "$tng_program"
+		printf ',"cwd":'
+		tng_json "$tng_cwd"
+		printf ',"folder":'
+		tng_json "$tng_folder"
+		printf ',"auth_id":'
+		tng_json_or_null "$tng_auth"
+		printf ',"account_id":'
+		tng_json_or_null "$tng_acct"
+		printf ',"account_name":'
+		tng_json_or_null "$tng_acct_name"
+		printf ',"account_type":'
+		tng_json_or_null "$tng_acct_type"
+		printf ',"pane":'
+		tng_json "$TERN_PANE"
+		printf ',"git":'
+		tng_git_json
+		printf ',"notes":['
+		tng_sep=
+		while IFS= read -r tng_line; do
+			[ -n "$tng_line" ] || continue
+			printf '%s' "$tng_sep"
+			tng_json "$tng_line"
+			tng_sep=,
+		done <<EOF
+$tng_notes
+EOF
+		printf '],"files":['
+		cat "$tng_work/files.json"
+		printf '],"fingerprint":"%s","created_at":%s,"timeout_s":%s}\n' "$tng_fp" "$tng_created" "$tng_timeout"
+	} >"$tng_req"
+}
+
+tng_mark_cancel() {
+	(
+		set -C
+		printf 'cancelled_at=%s\n' "$(date +%s)" >"$tng_spool/cancel-$tng_nonce"
+	) 2>/dev/null
+	return 0
+}
+
+tng_stop_waiting() {
+	[ -n "${tng_wpid-}" ] && kill -TERM "$tng_wpid" 2>/dev/null
+	[ -n "${tng_tpid-}" ] && kill -TERM "$tng_tpid" 2>/dev/null
+	tng_wpid=
+	tng_tpid=
+	return 0
+}
+
+tng_on_signal() {
+	trap '' INT TERM HUP
+	tng_stop_waiting
+	tng_mark_cancel
+	tng_cleanup
+	tng_err "cancelled; nothing was executed."
+	exit 130
+}
+
+tng_status() {
+	tng_via=status
+	printf 'tern-netsuite guard core: %s\n' "$0"
+	if tng_find_program 2>/dev/null; then
+		printf 'suitecloud: %s\n' "$tng_program"
+	else
+		printf 'suitecloud: not found on PATH\n'
+	fi
+	printf 'tern: %s\n' "$(command -v "${TERN_BIN:-tern}" 2>/dev/null || echo 'not found on PATH')"
+	printf 'guarded commands: %s\n' "${TNS_GUARD_COMMANDS-$tng_default_commands}"
+	printf 'approval timeout: %ss\n' "${TNS_GUARD_TIMEOUT:-600}"
+	if [ "${TNS_GUARD_CONFIRM-1}" = 0 ]; then
+		printf 'production confirmation: OFF (guard.confirm_production is false): guarded commands run without approval\n'
+	else
+		printf 'production confirmation: on\n'
+	fi
+	if [ "${TERM_PROGRAM-}" != tern ] || [ -z "${TERN_PANE-}" ]; then
+		printf 'this shell: not a Tern pane; guarded commands aimed at production are refused\n'
+	elif [ -z "${TNS_SPOOL-}" ]; then
+		printf 'this shell: Tern pane without TNS_SPOOL (started before the plugin loaded?); guarded commands aimed at production are refused until you open a new pane\n'
+	else
+		printf 'this shell: Tern pane %s; guarded commands aimed at production ask for approval (spool %s)\n' "$TERN_PANE" "$TNS_SPOOL"
+	fi
+}
+
+tng_guard() {
+	tng_sha_tool
+	tng_notes=
+	tng_project
+	tng_project_notes
+	tng_resolve_account
+	tng_classify
+	if [ "$tng_prod" = 0 ]; then
+		exec "$tng_program" "$@"
+	fi
+	tng_target_label
+	if [ "${TNS_GUARD_CONFIRM-1}" = 0 ]; then
+		tng_err "guard.confirm_production is false: running $tng_cmd against $tng_label without approval."
+		exec "$tng_program" "$@"
+	fi
+
+	[ "${TERM_PROGRAM-}" = tern ] && [ -n "${TERN_PANE-}" ] ||
+		tng_refuse "suitecloud $tng_cmd targets $tng_label and needs approval in Tern, but this shell is not a Tern pane (TERM_PROGRAM=tern and TERN_PANE are required). Run it in a Tern pane."
+	[ -n "${TNS_SPOOL-}" ] ||
+		tng_refuse "TNS_SPOOL is not set: this pane was started before the tern-netsuite plugin loaded. Open a new Tern pane and retry."
+	case $TNS_SPOOL in
+	/*) ;;
+	*) tng_refuse "TNS_SPOOL must be an absolute path: $TNS_SPOOL" ;;
+	esac
+	tng_timeout=${TNS_GUARD_TIMEOUT:-600}
+	case $tng_timeout in
+	'' | *[!0-9]* | 0) tng_refuse "TNS_GUARD_TIMEOUT must be a positive number of seconds: $tng_timeout" ;;
+	esac
+
+	tng_umask=$(umask)
+	umask 077
+	tng_spool=$TNS_SPOOL
+	[ -L "$tng_spool" ] && tng_refuse "the spool $tng_spool is a symlink."
+	[ -d "$tng_spool" ] || mkdir -p "$tng_spool" || tng_refuse "cannot create the spool $tng_spool."
+	[ -O "$tng_spool" ] || tng_refuse "the spool $tng_spool is not owned by you."
+	chmod 700 "$tng_spool" || tng_refuse "cannot restrict the spool $tng_spool."
+	tng_spool=$(cd -P -- "$tng_spool" && pwd -P) || tng_refuse "cannot enter the spool."
+	find "$tng_spool" -mindepth 1 -maxdepth 1 -type f \( -name 'req-*.json' -o -name 'resp-*.env' -o -name 'cancel-*' \) \
+		-mmin +$((tng_timeout / 60 + 1440)) -exec rm -f {} + 2>/dev/null
+
+	tng_nonce=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+	case $tng_nonce in
+	*[!0-9a-f]*) tng_refuse "cannot read /dev/urandom." ;;
+	esac
+	[ ${#tng_nonce} = 32 ] || tng_refuse "cannot read /dev/urandom."
+	tng_work=$tng_spool/work-$tng_nonce
+	mkdir "$tng_work" || tng_refuse "cannot create $tng_work."
+	trap tng_on_signal INT TERM HUP
+
+	tng_compute suitecloud "$@"
+	tng_req_fp=$tng_fp
+	tng_req_auth=$tng_auth
+	tng_created=$(date +%s)
+	tng_req=$tng_spool/req-$tng_nonce.json
+	tng_resp=$tng_spool/resp-$tng_nonce.env
+	(set -C && : >"$tng_req") 2>/dev/null || tng_refuse "cannot create $tng_req."
+	tng_write_request suitecloud "$@" || tng_refuse "cannot write $tng_req."
+
+	tng_err "suitecloud $tng_cmd targets $tng_label: waiting for approval in Tern (Ctrl-C cancels)..."
+	"${TERN_BIN:-tern}" open --wait "$tng_req" </dev/null >/dev/null &
+	tng_tpid=$!
+	(
+		trap 'kill "$tng_s" 2>/dev/null; exit 0' TERM
+		sleep "$tng_timeout" &
+		tng_s=$!
+		wait "$tng_s"
+		: >"$tng_work/timeout"
+		kill -TERM "$tng_tpid" 2>/dev/null
+	) &
+	tng_wpid=$!
+	wait "$tng_tpid"
+	tng_st=$?
+	tng_tpid=
+	tng_stop_waiting
+
+	if [ -e "$tng_work/timeout" ]; then
+		tng_mark_cancel
+		tng_refuse "no decision within ${tng_timeout}s (guard.timeout_s); the request was withdrawn."
+	fi
+	if [ "$tng_st" != 0 ]; then
+		tng_mark_cancel
+		tng_refuse "'tern open --wait' failed (exit $tng_st); is Tern running?"
+	fi
+	[ -e "$tng_resp" ] ||
+		tng_refuse "Tern returned without an approval response; the tern-netsuite approve block did not handle the request (plugin not loaded or disabled? It may have opened in an editor instead)."
+	[ -f "$tng_resp" ] && [ ! -L "$tng_resp" ] && [ -O "$tng_resp" ] ||
+		tng_refuse "the approval response $tng_resp is not a regular file owned by you."
+
+	tng_r_nonce=
+	tng_r_decision=
+	tng_r_fp=
+	tng_r_account=
+	tng_r_at=
+	tng_r_reason=
+	tng_dup=
+	while IFS= read -r tng_line || [ -n "$tng_line" ]; do
+		tng_k=${tng_line%%=*}
+		tng_v=${tng_line#*=}
+		case $tng_k in
+		nonce | decision | fingerprint | account | approved_at | reason)
+			eval "[ -n \"\${tng_seen_$tng_k-}\" ] && tng_dup=$tng_k; tng_seen_$tng_k=1"
+			;;
+		esac
+		case $tng_k in
+		nonce) tng_r_nonce=$tng_v ;;
+		decision) tng_r_decision=$tng_v ;;
+		fingerprint) tng_r_fp=$tng_v ;;
+		account) tng_r_account=$tng_v ;;
+		approved_at) tng_r_at=$tng_v ;;
+		reason) tng_r_reason=$(printf '%s' "$tng_v" | LC_ALL=C tr -cd '[:print:]') ;;
+		esac
+	done <"$tng_resp"
+	[ -z "$tng_dup" ] || tng_refuse "the approval response repeats '$tng_dup'; refusing it."
+	[ "$tng_r_nonce" = "$tng_nonce" ] || tng_refuse "the approval response belongs to another request (nonce mismatch)."
+	case $tng_r_decision in
+	approve) ;;
+	deny)
+		if [ -n "$tng_r_reason" ]; then
+			tng_err "denied in Tern: $tng_r_reason"
+		else
+			tng_err "denied in Tern; nothing was executed."
+		fi
+		tng_cleanup
+		exit 1
+		;;
+	*) tng_refuse "the approval response has no valid decision." ;;
+	esac
+	case $tng_r_at in
+	'' | *[!0-9]*) tng_refuse "the approval response has no valid approved_at." ;;
+	esac
+	[ "$tng_r_at" -ge "$tng_created" ] && [ "$tng_r_at" -le $((tng_created + tng_timeout)) ] &&
+		[ "$(date +%s)" -le $((tng_created + tng_timeout)) ] ||
+		tng_refuse "the approval is outside the ${tng_timeout}s window of the request."
+	[ "$tng_r_account" = "${tng_acct:--}" ] ||
+		tng_refuse "the approval was for account '$tng_r_account', not '${tng_acct:--}' (account mismatch)."
+
+	tng_notes=
+	tng_project
+	[ "$tng_auth" = "$tng_req_auth" ] ||
+		tng_refuse "project.json's defaultAuthId changed since the request (was '$tng_req_auth', now '$tng_auth'); run the command again."
+	tng_compute suitecloud "$@"
+	[ "$tng_fp" = "$tng_req_fp" ] && [ "$tng_fp" = "$tng_r_fp" ] ||
+		tng_refuse "the command or the project files changed since approval (fingerprint mismatch); run it again to preview the current state."
+
+	trap - INT TERM HUP
+	tng_cleanup
+	umask "$tng_umask"
+	exec "$tng_program" "$@"
+}
+
+tng_main() {
+	tng_find_program || {
+		[ "$tng_via" = shim ] && tng_err "remove $(dirname -- "$0")/bin from PATH or install the SuiteCloud CLI."
+		exit 127
+	}
+	tng_scan "$@"
+	tng_is_guarded || exec "$tng_program" "$@"
+	[ -n "$tng_help" ] && exec "$tng_program" "$@"
+	# A deploy preview changes nothing in the account, unless a
+	# beforeExecuting hook (run by the CLI first) rewrites the arguments. A
+	# config that loads other code may get one from there, and an unreadable
+	# config may hold one: neither takes the shortcut.
+	if [ "$tng_cmd" = project:deploy ] && [ -n "$tng_dry" ]; then
+		if [ ! -e suitecloud.config.js ]; then
+			exec "$tng_program" "$@"
+		fi
+		grep -Eq 'beforeExecuting|require[[:space:]]*\(|import[[:space:](]' suitecloud.config.js 2>/dev/null
+		[ $? = 1 ] && exec "$tng_program" "$@"
+	fi
+	tng_guard "$@"
+}
+
+case ${1-} in
+suitecloud | shim)
+	tng_via=$1
+	shift
+	tng_main "$@"
+	;;
+status)
+	tng_status
+	;;
+*)
+	echo "usage: tern-netsuite-guard suitecloud [ARGS...] | tern-netsuite-guard shim [ARGS...] | tern-netsuite-guard status" >&2
+	exit 2
+	;;
+esac

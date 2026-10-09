@@ -1,0 +1,25 @@
+Usage: suitecloud account:manageauth [options]
+
+Manages authentication IDs for all your projects. An authentication ID is a
+custom alias you give to a specific account-role combination.
+
+Options:
+  --info <argument>      Prints the following information for the specified
+                         authentication ID: account ID, role ID, and url.
+                         Usage: account:manageauth --info [myAuthId].
+  -i, --interactive      Runs the account:manageauth command in interactive
+                         mode.
+  --list                 Prints a list of all the configured authentication
+                         IDs. Usage: account:manageauth --list.
+  --remove <argument>    Removes an authentication ID. The tokens are not
+                         revoked in the account. Usage: account:manageauth
+                         --remove [myAuthId].
+  --rename <argument>    Renames an authentication ID. You must specify it
+                         together with the renameto option. Usage:
+                         account:manageauth --rename [myAuthId] --renameto
+                         [newAuthId].
+  --renameto <argument>  Specifies the new ID for an authentication ID. You
+                         must specify it together with the rename option.
+                         Usage: account:manageauth --rename [myAuthId]
+                         --renameto [newAuthId].
+  -h, --help             Displays help for the command.

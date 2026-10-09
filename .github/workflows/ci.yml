@@ -1,0 +1,153 @@
+# Tern is closed beta and not installable here: `make smoke` loads the real
+# plugin sources against a strict stub `tern`; `make smoke-real` (local only)
+# loads the package in an isolated real Tern.
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS arm64 and Linux x86_64: the hosts scripts/bootstrap.sh supports.
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache .tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh') }}
+
+      - name: Install shells (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends fish zsh
+
+      - name: Install fish (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fish
+
+      - name: Bootstrap pinned tools
+        run: make bootstrap
+
+      - name: make check
+        run: make check
+
+  package:
+    name: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the package
+        shell: python3 {0}
+        run: |
+          import pathlib, re, subprocess, sys, tomllib
+
+          # The package is the repository root (tern plugin install copies it
+          # whole); everything the loader reaches must live under plugin/.
+          src = pathlib.Path("plugin")
+          errors = []
+          manifest = tomllib.loads(pathlib.Path("plugin.toml").read_text())
+
+          def under_src(path):
+              p = pathlib.PurePosixPath(path)
+              return not p.is_absolute() and ".." not in p.parts and p.parts[:1] == ("plugin",)
+
+          for key in ("schema", "id", "name", "version", "host", "window"):
+              if key not in manifest:
+                  errors.append(f"plugin.toml: missing {key}")
+          version = str(manifest.get("version", ""))
+          if not re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?", version):
+              errors.append(f"plugin.toml: version {version!r} is not SemVer")
+          entries = []
+          for key in ("host", "window"):
+              if key not in manifest:
+                  continue
+              if not under_src(manifest[key]):
+                  errors.append(f"plugin.toml: {key} {manifest[key]} is not under plugin/")
+              elif not pathlib.Path(manifest[key]).is_file():
+                  errors.append(f"plugin.toml: {key} {manifest[key]} does not exist")
+              else:
+                  entries.append(pathlib.Path(manifest[key]))
+          for style in manifest.get("styles", []):
+              if not under_src(style):
+                  errors.append(f"plugin.toml: style {style} is not under plugin/")
+              elif not pathlib.Path(style).is_file():
+                  errors.append(f"plugin.toml: style {style} does not exist")
+
+          # Follow require() from both entries: every module must resolve under plugin/.
+          root = pathlib.Path.cwd().resolve()
+          seen, todo = set(), list(entries)
+          while todo:
+              path = todo.pop()
+              if path in seen:
+                  continue
+              seen.add(path)
+              for spec in re.findall(r'require\(\s*"([^"]+)"\s*\)', path.read_text()):
+                  if not spec.startswith(("./", "../")):
+                      errors.append(f"{path}: require {spec!r} is not relative")
+                      continue
+                  base = (path.parent / spec).resolve()
+                  hit = next((c for c in (base.with_name(base.name + ".luau"), base / "init.luau") if c.is_file()), None)
+                  if hit is None:
+                      errors.append(f"{path}: require {spec!r} does not resolve")
+                      continue
+                  rel = hit.relative_to(root) if hit.is_relative_to(root) else hit
+                  if not under_src(rel.as_posix()):
+                      errors.append(f"{path}: require {spec!r} leaves plugin/ ({rel})")
+                      continue
+                  todo.append(rel)
+
+          # plugin/ holds only Luau sources and styles.
+          tracked = subprocess.run(
+              ["git", "ls-files", "-z", "--", str(src)], check=True, capture_output=True, text=True
+          ).stdout.split("\0")
+          shipped = [pathlib.Path(p) for p in tracked if p]
+          for path in shipped:
+              parts = {part.lower() for part in path.parts}
+              if parts & {"test", "tests", "spec", "specs", "fixtures", "testdata"}:
+                  errors.append(f"{path}: test or fixture directory inside plugin/")
+              elif path.name.endswith((".spec.luau", ".test.luau")):
+                  errors.append(f"{path}: spec file inside plugin/")
+              elif path.suffix not in (".luau", ".css"):
+                  errors.append(f"{path}: not a shippable file (.luau, .css)")
+
+          sources = "\n".join(p.read_text() for p in seen)
+          for kind, table in (("lens", "lenses"), ("block", "blocks")):
+              for entry in manifest.get(table, []):
+                  ident = entry.get("id", "")
+                  if not re.search(rf'tern\.{kind}\.define\(\s*"{re.escape(ident)}"', sources):
+                      errors.append(f"plugin.toml: {kind} {ident!r} has no tern.{kind}.define")
+
+          for e in errors:
+              print(f"::error::{e}")
+          print(f"{len(seen)} reachable modules, {len(shipped)} files under plugin/, {len(errors)} problem(s)")
+          sys.exit(1 if errors else 0)

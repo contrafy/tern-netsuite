@@ -1,0 +1,69 @@
+#!/bin/sh
+# Fake `tern` for the guard tests: only `tern open --wait <req>`. Plays the
+# approve block according to $FAKE_DIR/tern-mode:
+#   approve      writes a valid approval
+#   deny         writes a denial
+#   denyreason   writes a denial with a reason holding an escape sequence
+#   hang         never answers (until killed)
+#   noresp       returns 0 without a response (request opened in an editor)
+#   fail         exits 3 (tern open itself failed)
+#   wrongnonce   approval carrying another nonce
+#   tamper       approval carrying another fingerprint
+#   wrongaccount approval for another account
+#   stale        appends to the first listed file, then approves
+#   retarget     points project.json at the sandbox auth ID, then approves
+#   old          approval dated before the request
+#   dup          approval repeating the decision line
+# It copies the request to $FAKE_DIR/req.json and records the modes of the
+# request file and spool dir in $FAKE_DIR/req-mode and spool-mode.
+d=${FAKE_DIR:?FAKE_DIR is required}
+printf '%s\n' "$*" >>"$d/tern-calls"
+[ "$1" = open ] && [ "$2" = --wait ] && [ $# = 3 ] || {
+	echo "fake tern: unexpected arguments: $*" >&2
+	exit 2
+}
+req=$3
+cp "$req" "$d/req.json"
+ls -ld "$req" | cut -c1-10 >"$d/req-mode"
+ls -ld "$(dirname "$req")" | cut -c1-10 >"$d/spool-mode"
+
+field() {
+	sed -n "s/.*\"$1\":\"\{0,1\}\([^\",}]*\).*/\1/p" "$req"
+}
+nonce=$(field nonce)
+fp=$(field fingerprint)
+account=$(field account_id)
+[ "$account" = null ] && account=-
+at=$(field created_at)
+resp=$(dirname "$req")/resp-$nonce.env
+decision=approve
+
+mode=$(cat "$d/tern-mode" 2>/dev/null || echo approve)
+case $mode in
+approve | dup) ;;
+deny | denyreason) decision=deny ;;
+hang) exec sleep 1797 ;;
+noresp) exit 0 ;;
+fail) exit 3 ;;
+wrongnonce) nonce=00000000000000000000000000000000 ;;
+tamper) fp=0000000000000000000000000000000000000000000000000000000000000000 ;;
+wrongaccount) account=7654321 ;;
+stale)
+	f=$(sed -n 's/.*"files":\[{"path":"\([^"]*\)".*/\1/p' "$req")
+	echo "// edited" >>"$f"
+	;;
+retarget)
+	cwd=$(field cwd)
+	printf '{"defaultAuthId":"sandbox"}\n' >"$cwd/project.json"
+	;;
+old) at=$((at - 1)) ;;
+*)
+	echo "fake tern: unknown mode $mode" >&2
+	exit 2
+	;;
+esac
+printf 'nonce=%s\ndecision=%s\nfingerprint=%s\naccount=%s\napproved_at=%s\n' "$nonce" "$decision" "$fp" "$account" "$at" >"$resp.tmp"
+[ "$mode" = dup ] && echo 'decision=deny' >>"$resp.tmp"
+[ "$mode" = denyreason ] && printf 'reason=Not in the spool\033[31m (refused)\n' >>"$resp.tmp"
+mv "$resp.tmp" "$resp"
+exit 0

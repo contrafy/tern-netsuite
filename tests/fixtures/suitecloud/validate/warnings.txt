@@ -1,0 +1,4 @@
+The following warnings were found during local validation:
+    /work/proj/warnings/src/Objects/customscript_tns_demo.xml
+        - Line No. 13 - The "allpartners" field depends on the "CRM" feature. The manifest must define the "CRM" feature as required or optional.
+The validation process has finished.

@@ -1,0 +1,26 @@
+<suitelet scriptid="customscript2294">
+  <description>This is a real thing, do not deactivate.&#xd;
+DO NOT TOUCH.</description>
+  <isinactive>F</isinactive>
+  <name>Order Lookup Suitelet</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <notifyuser>F</notifyuser>
+  <scriptfile>[/SuiteScripts/order_lookup_suitelet.js]</scriptfile>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy2">
+      <allemployees>F</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>T</allroles>
+      <audslctrole></audslctrole>
+      <eventtype></eventtype>
+      <isdeployed>T</isdeployed>
+      <isonline>F</isonline>
+      <loglevel>ERROR</loglevel>
+      <runasrole>ADMINISTRATOR</runasrole>
+      <status>RELEASED</status>
+      <title>Order Lookup Suitelet</title>
+    </scriptdeployment>
+  </scriptdeployments>
+</suitelet>

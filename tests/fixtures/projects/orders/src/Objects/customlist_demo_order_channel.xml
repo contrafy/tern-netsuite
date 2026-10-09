@@ -1,0 +1,17 @@
+<customlist scriptid="customlist_demo_order_channel">
+  <description>Order channel values for the order sync, derived from the source field of the imported order (web/marketplace).</description>
+  <isinactive>F</isinactive>
+  <ismatrixoption>F</ismatrixoption>
+  <isordered>T</isordered>
+  <name>Order Channel</name>
+  <customvalues>
+    <customvalue scriptid="demo_oc_web">
+      <isinactive>F</isinactive>
+      <value>Web</value>
+    </customvalue>
+    <customvalue scriptid="demo_oc_marketplace">
+      <isinactive>F</isinactive>
+      <value>Marketplace</value>
+    </customvalue>
+  </customvalues>
+</customlist>

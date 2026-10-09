@@ -1,0 +1,18 @@
+<manifest projecttype="ACCOUNTCUSTOMIZATION">
+  <projectname>orders</projectname>
+  <frameworkversion>1.0</frameworkversion>
+  <dependencies>
+    <features>
+      <feature required="true">SERVERSIDESCRIPTING</feature>
+      <feature required="false">MARKETING</feature>
+      <feature required="false">SUPPORT</feature>
+      <feature required="false">ADVANCEDJOBS</feature>
+      <feature required="false">RESOURCEALLOCATIONS</feature>
+      <feature required="false">CRM</feature>
+      <feature required="false">JOBS</feature>
+      <feature required="false">ACCOUNTING</feature>
+      <feature required="false">SUITESIGNON</feature>
+      <feature required="false">MATRIXITEMS</feature>
+    </features>
+  </dependencies>
+</manifest>

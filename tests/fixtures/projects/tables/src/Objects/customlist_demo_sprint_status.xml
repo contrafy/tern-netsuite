@@ -1,0 +1,24 @@
+<customlist scriptid="customlist_demo_sprint_status">
+  <name>Demo - Sprint Status</name>
+  <description>Lifecycle status for fulfillment planning sprints</description>
+  <isinactive>F</isinactive>
+  <isordered>T</isordered>
+  <customvalues>
+    <customvalue scriptid="demo_ss_draft">
+      <value>Draft</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+    <customvalue scriptid="demo_ss_planned">
+      <value>Planned</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+    <customvalue scriptid="demo_ss_active">
+      <value>Active</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+    <customvalue scriptid="demo_ss_closed">
+      <value>Completed</value>
+      <isinactive>F</isinactive>
+    </customvalue>
+  </customvalues>
+</customlist>

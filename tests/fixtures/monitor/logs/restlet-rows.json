@@ -1,0 +1,70 @@
+[
+  {
+    "internalid": 5771427,
+    "logged": "2026-10-08 22:15:40",
+    "type": "AUDIT",
+    "title": "suiteql:exec.done",
+    "detail": "{\"count\":3}",
+    "scripttype": 3561,
+    "scriptid": "customscript_demo_suiteql",
+    "scriptname": "SuiteQL RESTlet"
+  },
+  {
+    "internalid": 5771426,
+    "logged": "2026-10-08 22:15:39",
+    "type": "AUDIT",
+    "title": "suiteql:exec.start",
+    "detail": "{\"len\":127,\"params\":0,\"account\":\"1234567_SB1\"}",
+    "scripttype": 3561,
+    "scriptid": "customscript_demo_suiteql",
+    "scriptname": "SuiteQL RESTlet"
+  },
+  {
+    "internalid": 5771329,
+    "logged": "2026-10-08 22:15:47",
+    "type": "ERROR",
+    "title": "restlet.error",
+    "detail": "{\"name\":\"SSS_DUPLICATE_ALIAS\",\"message\":\"Duplicate alias: 'last'\",\"stack\":[\"Error\",\"    at /SuiteScripts/restlets/suiteql.js:1491:42\",\"    at Object.post (/SuiteScripts/restlets/suiteql.js:1490:22)\"]}",
+    "scripttype": 3561,
+    "scriptid": "customscript_demo_suiteql",
+    "scriptname": "SuiteQL RESTlet"
+  },
+  {
+    "internalid": 5771328,
+    "logged": "2026-10-08 22:15:47",
+    "type": "AUDIT",
+    "title": "suiteql:exec.start",
+    "detail": "{\"len\":89,\"params\":0,\"account\":\"1234567_SB1\"}",
+    "scripttype": 3561,
+    "scriptid": "customscript_demo_suiteql",
+    "scriptname": "SuiteQL RESTlet"
+  },
+  {
+    "internalid": 5771130,
+    "logged": "2026-10-08 22:16:02",
+    "type": "DEBUG",
+    "title": "storefront:order-metrics:list.start",
+    "detail": "{\"rawParams\":{\"_order\":\"DESC\",\"_start\":\"0\",\"resource\":\"sf-order-metrics\",\"apiScriptId\":\"customscript_demo_storefront_api\",\"uiDeploymentId\":\"customdeploy_demo_storefront_ui\",\"userTypes\":\"admin,customer,guest,unknown\",\"uiScriptId\":\"customscript_demo_storefront_ui\",\"_sort\":\"timestamp\",\"script\":\"4841\",\"deploy\":\"1\",\"_end\":\"1000\",\"compid\":\"1234567_SB1\",\"event\":\"login\",\"status\":\"success\"},\"paramKeys\":[\"_order\",\"_start\",\"resource\",\"apiScriptId\",\"uiDeploymentId\",\"userTypes\",\"uiScriptId\",\"_sort\",\"script\",\"deploy\",\"_end\",\"compid\",\"event\",\"status\"]}",
+    "scripttype": 4841,
+    "scriptid": "customscript_demo_storefront_api",
+    "scriptname": "Storefront API (demo)"
+  },
+  {
+    "internalid": 5771027,
+    "logged": "2026-10-08 22:16:05",
+    "type": "SYSTEM",
+    "title": "JS_EXCEPTION",
+    "detail": "org.mozilla.javascript.EcmaError: SyntaxError: Empty JSON string (/SuiteApps/com.netsuite.bankfeeds/src/model/mx/bf_model_mx_masker.js#33);  ID: ",
+    "scripttype": 2101,
+    "scriptid": "customscript_fi_account_aggr_mx",
+    "scriptname": "US and CA Bank Feeds Connectivity MX"
+  },
+  {
+    "internalid": 5771131,
+    "logged": "2026-10-08 22:16:09",
+    "type": "ERROR",
+    "title": "Error: sync failed",
+    "detail": "{\"name\":\"SSS_USAGE_LIMIT_EXCEEDED\",\"message\":\"Script Execution Usage Limit Exceeded\",\"stack\":[\"Error\",\"    at Object.execute (/SuiteScripts/map-reduce/order_sync.js:88:17)\"",
+    "scripttype": 4902
+  }
+]

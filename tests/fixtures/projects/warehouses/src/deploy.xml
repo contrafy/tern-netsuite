@@ -1,0 +1,16 @@
+<deploy>
+    <configuration>
+        <path>~/AccountConfiguration/*</path>
+    </configuration>
+    <files>
+        <path>~/FileCabinet/SuiteScripts/common/integrations/carriers/*</path>
+        <path>~/FileCabinet/SuiteScripts/warehouses/*</path>
+        <path>~/FileCabinet/SuiteScripts/user-events/*</path>
+    </files>
+    <objects>
+        <path>~/Objects/*</path>
+    </objects>
+    <translationimports>
+        <path>~/Translations/*</path>
+    </translationimports>
+</deploy>

@@ -1,0 +1,224 @@
+#!/bin/sh
+# tern-netsuite-wrappers: lens claims for the `lens.wrappers` of your config.
+# Run with --help for usage.
+
+set -u
+
+prog=tern-netsuite-wrappers
+BEGIN_MARK='# BEGIN tern-netsuite wrappers'
+END_MARK='# END tern-netsuite wrappers'
+LENS_ID=suitecloud
+
+usage() {
+	cat <<'EOF'
+usage: tern-netsuite-wrappers [--check] [--config FILE] [--plugin-dir DIR]
+
+Writes Tern lens claims (manifest globs) for every `lens.wrappers[].prefix`
+of your tern-netsuite config into the installed plugin's manifest, so a
+wrapper such as `npm run validate --project x` gets the SuiteCloud lens.
+Each prefix becomes two globs, "<prefix>" and "<prefix> *", in the block
+between the BEGIN/END tern-netsuite wrappers markers of lens "suitecloud".
+The block is rewritten as a whole: prefixes removed from the config lose
+their claims. Running it again changes nothing.
+
+  --check           change nothing; exit 1 when the manifest's block does not
+                    match the config (0 when it does)
+  --config FILE     config file (default: $XDG_CONFIG_HOME/tern-netsuite/
+                    config.json, else ~/.config/tern-netsuite/config.json)
+  --plugin-dir DIR  package directory holding plugin.toml (default: the
+                    installed or linked tern-netsuite under `tern plugin dir`)
+  -h, --help        this help
+
+Reading the config needs one of jq, plutil (macOS) or python3; the first
+installed is used unless TNS_WRAPPERS_JSON names one.
+
+Prefixes may not contain glob characters (* ? [ ]), quotes or backslashes:
+the claim would match other commands or break the manifest.
+
+Limitations:
+  - Globs are static manifest entries. `tern plugin install --force` (and
+    plugin updates) replace the manifest: run this again afterwards. Run
+    `tern plugin reload` after every change; this script never runs it.
+  - A claim cannot be declined at run time: a wrapper that stops running
+    SuiteCloud still hides Tern's built-in lenses for those lines (the
+    tern-netsuite lens shows them raw).
+  - A linked plugin (tern-netsuite.path) is edited in place, in its source
+    tree.
+EOF
+}
+
+die() {
+	printf '%s: %s\n' "$prog" "$*" >&2
+	exit 2
+}
+
+note() {
+	printf '%s\n' "$*" >&2
+}
+
+check=0
+config=
+plugin_dir=
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	--check) check=1 ;;
+	--config)
+		[ $# -ge 2 ] || die "--config needs a value"
+		config=$2
+		shift
+		;;
+	--config=*) config=${1#--config=} ;;
+	--plugin-dir)
+		[ $# -ge 2 ] || die "--plugin-dir needs a value"
+		plugin_dir=$2
+		shift
+		;;
+	--plugin-dir=*) plugin_dir=${1#--plugin-dir=} ;;
+	*) die "unknown argument: $1 (see --help)" ;;
+	esac
+	shift
+done
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/tern-netsuite-wrappers.XXXXXX") || die "cannot create a temp dir"
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# ------------------------------------------------------------------ config
+
+if [ -z "$config" ]; then
+	if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+		config=$XDG_CONFIG_HOME/tern-netsuite/config.json
+	elif [ -n "${HOME:-}" ]; then
+		config=$HOME/.config/tern-netsuite/config.json
+	else
+		die "neither XDG_CONFIG_HOME nor HOME is set; pass --config FILE"
+	fi
+fi
+
+# The JSON reader: TNS_WRAPPERS_JSON (jq, plutil or python3), else the
+# first one installed.
+reader=${TNS_WRAPPERS_JSON:-}
+if [ -z "$reader" ]; then
+	for r in jq plutil python3; do
+		if command -v "$r" >/dev/null 2>&1; then
+			reader=$r
+			break
+		fi
+	done
+fi
+case $reader in
+jq | plutil | python3) ;;
+'') die "reading $config needs jq, plutil or python3" ;;
+*) die "unknown TNS_WRAPPERS_JSON reader: $reader" ;;
+esac
+
+# Prints every lens.wrappers[].prefix, one per line.
+read_prefixes() {
+	case $reader in
+	jq)
+		jq -r '(.lens.wrappers // [])[]? | objects | .prefix | strings' "$config"
+		;;
+	plutil)
+		plutil -convert json -o /dev/null "$config" || return 1
+		i=0
+		while plutil -extract "lens.wrappers.$i" json -o /dev/null "$config" >/dev/null 2>&1; do
+			plutil -extract "lens.wrappers.$i.prefix" raw -o - "$config" 2>/dev/null
+			i=$((i + 1))
+		done
+		;;
+	python3)
+		python3 - "$config" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+lens = doc.get("lens") if isinstance(doc, dict) else None
+for w in (lens or {}).get("wrappers") or []:
+    p = w.get("prefix") if isinstance(w, dict) else None
+    if isinstance(p, str):
+        print(p)
+PY
+		;;
+	esac
+}
+
+: >"$tmp/prefixes"
+if [ -f "$config" ]; then
+	read_prefixes >"$tmp/raw" 2>"$tmp/err" || die "cannot read $config: $(cat "$tmp/err")"
+	# Whitespace-normalized, the way the lens compares words; sorted, unique.
+	awk '{ $1 = $1; if ($0 != "") print }' "$tmp/raw" | LC_ALL=C sort -u >"$tmp/prefixes"
+	while IFS= read -r p; do
+		if printf '%s' "$p" | grep -Eq '[*?"]|\[|\]|\\'; then
+			die "wrapper prefix '$p' contains a glob character, quote or backslash; refusing"
+		fi
+		if printf '%s' "$p" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+			die "wrapper prefix '$p' contains a control character; refusing"
+		fi
+	done <"$tmp/prefixes"
+else
+	note "no config at $config: the wrapper block will be empty"
+fi
+
+# ---------------------------------------------------------------- manifest
+
+if [ -z "$plugin_dir" ]; then
+	tern_bin=${TERN_BIN:-tern}
+	command -v "$tern_bin" >/dev/null 2>&1 || die "tern not found; pass --plugin-dir DIR"
+	pdir=$("$tern_bin" plugin dir 2>/dev/null) || die "\`$tern_bin plugin dir\` failed; pass --plugin-dir DIR"
+	[ -n "$pdir" ] || die "\`$tern_bin plugin dir\` printed nothing; pass --plugin-dir DIR"
+	if [ -f "$pdir/tern-netsuite.path" ]; then
+		IFS= read -r plugin_dir <"$pdir/tern-netsuite.path" || [ -n "$plugin_dir" ] || die "empty $pdir/tern-netsuite.path"
+		note "tern-netsuite is linked: using its source manifest in $plugin_dir"
+	elif [ -d "$pdir/tern-netsuite" ]; then
+		plugin_dir=$pdir/tern-netsuite
+	else
+		die "tern-netsuite is not installed in $pdir; pass --plugin-dir DIR"
+	fi
+fi
+manifest=$plugin_dir/plugin.toml
+[ -f "$manifest" ] || die "no plugin.toml in $plugin_dir"
+
+# Exactly one BEGIN before exactly one END, inside lens "suitecloud".
+markers=$(awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v want="$LENS_ID" '
+	{ t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t) }
+	t ~ /^\[\[?[^]]*\]\]?$/ { lens = "" }
+	t ~ /^id[ \t]*=/ { lens = t }
+	t == b { nb++; if (nb == 1) { bl = NR; blens = lens } }
+	t == e { ne++; if (ne == 1) el = NR }
+	END {
+		if (nb == 0 && ne == 0) { print "missing"; exit }
+		if (nb != 1 || ne != 1 || bl > el) { print "malformed"; exit }
+		if (blens !~ ("^id[ \t]*=[ \t]*\"" want "\"$")) { print "misplaced"; exit }
+		print "ok"
+	}' "$manifest") || die "cannot read $manifest"
+case $markers in
+ok) ;;
+missing) die "$manifest has no '$BEGIN_MARK' / '$END_MARK' block; refusing to edit it (reinstall tern-netsuite)" ;;
+malformed) die "$manifest needs exactly one '$BEGIN_MARK' line before one '$END_MARK' line" ;;
+*) die "the wrapper block in $manifest is not inside lens \"$LENS_ID\"" ;;
+esac
+
+awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v prefixes="$tmp/prefixes" '
+	BEGIN { while ((getline p < prefixes) > 0) if (p != "") list[++n] = p }
+	{ t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t) }
+	t == b { print; ind = $0; sub(/[^ \t].*/, "", ind); for (i = 1; i <= n; i++) printf "%s\"%s\",\n%s\"%s *\",\n", ind, list[i], ind, list[i]; skip = 1; next }
+	t == e { skip = 0 }
+	!skip { print }
+' "$manifest" >"$tmp/plugin.toml" || die "could not rewrite $manifest"
+
+count=$(wc -l <"$tmp/prefixes" | tr -d ' ')
+if cmp -s "$tmp/plugin.toml" "$manifest"; then
+	note "$manifest claims every wrapper prefix ($count)"
+	exit 0
+fi
+if [ "$check" = 1 ]; then
+	note "$manifest does not match the $count wrapper prefix(es) of $config; run $prog to update it"
+	diff "$manifest" "$tmp/plugin.toml" >&2
+	exit 1
+fi
+cp "$tmp/plugin.toml" "$manifest.$prog.tmp" && mv -f "$manifest.$prog.tmp" "$manifest" || die "could not write $manifest"
+note "updated $manifest ($count wrapper prefix(es)); run \`tern plugin reload\` to apply"

@@ -1,0 +1,29 @@
+The deployment process has encountered an error.
+Deploying to 1234567_SB1 - Example Co - Administrator.
+2026-10-09 00:12:03 (PDT) Installation started
+Info -- Account [(SANDBOX) Example Co]
+Info -- Account Customization Project [tns-demo]
+Info -- Framework Version [1.0]
+Validate manifest -- Success
+Validate deploy file -- Success
+Validate configuration -- Success
+Validate objects -- Success
+Validate files -- Success
+Validate folders -- Success
+Validate translation imports -- Success
+Validation of referenceability from custom objects to translations collection strings in progress. -- Success
+Validate preferences -- Success
+Validate flags -- Success
+Validate account settings -- Success
+Validate Custom Objects against the Account -- Success
+Validate file cabinet items against the account -- Success
+Validate translation imports against the account -- Success
+Validation of references to translation collection strings against account in progress. -- Success
+Begin deployment
+Upload file -- ~/FileCabinet/SuiteScripts/tns_demo.js
+Update object -- customscript_tns_demo (restlet)
+*** ERROR ***
+
+An unexpected error has occurred.
+Details: The record type customrecord_tns_demo is locked and cannot be updated.
+Object: customrecord_tns_demo (customrecordtype)

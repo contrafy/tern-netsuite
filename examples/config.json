@@ -1,0 +1,77 @@
+{
+	"schema_version": 1,
+	"suitecloud": {
+		"program": "suitecloud",
+		"timeout_ms": 600000
+	},
+	"lens": {
+		"wrappers": [
+			{ "prefix": "npm run validate", "command": "project:validate" },
+			{ "prefix": "npm run deploy", "command": "project:deploy" },
+			{ "prefix": "./scripts/sdf.sh validate", "command": "project:validate" },
+			{ "prefix": "./scripts/sdf.sh deploy", "command": "project:deploy" },
+			{ "prefix": "./scripts/sdf.sh upload", "command": "file:upload" }
+		]
+	},
+	"projects": {
+		"roots": ["sdf"],
+		"follow_symlinks": true
+	},
+	"accounts": [
+		{ "id": "sandbox", "label": "SB1", "account_id": "1234567_SB1", "auth_ids": ["sandbox"] },
+		{ "id": "prod", "label": "PROD", "account_id": "1234567", "auth_ids": ["prod"], "production": true }
+	],
+	"guard": {
+		"confirm_production": true,
+		"typed_confirmation": true,
+		"commands": ["project:deploy", "file:upload"]
+	},
+	"connections": [
+		{
+			"id": "sandbox-restlet",
+			"account": "sandbox",
+			"auth": "tba",
+			"transport": "restlet",
+			"read_only": true,
+			"restlet": {
+				"script": "customscript_acme_suiteql",
+				"deploy": "customdeploy_acme_suiteql",
+				"query_field": "query",
+				"params_field": "params",
+				"rows_path": "rows",
+				"extra": { "action": "suiteql" }
+			}
+		}
+	],
+	"monitor": {
+		"poll_seconds": 120,
+		"log_poll_seconds": 15,
+		"log_title_json": true,
+		"checks": [
+			{
+				"id": "order-sync",
+				"label": "Order sync",
+				"connection": "sandbox-restlet",
+				"kind": "freshness",
+				"query": "SELECT MAX(lastmodifieddate) AS last FROM customrecord_acme_order",
+				"max_age_minutes": 90
+			},
+			{
+				"id": "script-errors-1h",
+				"label": "Script errors (1h)",
+				"connection": "sandbox-restlet",
+				"kind": "count",
+				"query": "SELECT COUNT(*) AS n FROM scriptnote WHERE type = 'ERROR' AND date > SYSDATE - (1/24)",
+				"warn_at": 1,
+				"error_at": 10
+			}
+		],
+		"script_errors": { "enabled": true, "hour_error_at": 10, "day_warn_at": 50 }
+	},
+	"status": {
+		"enabled": true
+	},
+	"history": {
+		"ci": { "workflow": "sdf-deploy.yml" }
+	}
+}

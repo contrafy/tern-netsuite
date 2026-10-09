@@ -1,0 +1,4 @@
+The following files were uploaded:
+/SuiteScripts/tns_demo.js
+The following files were not uploaded:
+/SuiteScripts/tns_locked.js: File(s) are inactive. Set to active before uploading.

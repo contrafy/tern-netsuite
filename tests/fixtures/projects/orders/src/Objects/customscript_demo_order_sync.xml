@@ -1,0 +1,88 @@
+<mapreducescript scriptid="customscript_demo_order_sync">
+  <description>Pull new orders from the web store for active customers and write idempotent sales order records, keyed on the external order id.</description>
+  <isinactive>F</isinactive>
+  <name>Order Sync</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <scriptfile>[/SuiteScripts/map-reduce/order_sync.js]</scriptfile>
+  <scriptcustomfields>
+    <scriptcustomfield scriptid="custscript_demo_os_dry_run">
+      <accesslevel>2</accesslevel>
+      <applyformatting>F</applyformatting>
+      <checkspelling>F</checkspelling>
+      <defaultchecked>F</defaultchecked>
+      <defaultselection></defaultselection>
+      <defaultvalue></defaultvalue>
+      <description>When checked, logs what would be created or matched without writing any sales order record. Every run in sandbox should be validated dry-run first.</description>
+      <displayheight></displayheight>
+      <displaytype>NORMAL</displaytype>
+      <displaywidth></displaywidth>
+      <dynamicdefault></dynamicdefault>
+      <fieldtype>CHECKBOX</fieldtype>
+      <help></help>
+      <isformula>F</isformula>
+      <ismandatory>F</ismandatory>
+      <label>Dry Run</label>
+      <linktext></linktext>
+      <maxlength></maxlength>
+      <maxvalue></maxvalue>
+      <minvalue></minvalue>
+      <onparentdelete></onparentdelete>
+      <searchlevel>2</searchlevel>
+      <selectrecordtype></selectrecordtype>
+      <setting></setting>
+      <storevalue>T</storevalue>
+    </scriptcustomfield>
+    <scriptcustomfield scriptid="custscript_demo_os_lookback_minutes">
+      <accesslevel>2</accesslevel>
+      <applyformatting>F</applyformatting>
+      <checkspelling>F</checkspelling>
+      <defaultchecked>F</defaultchecked>
+      <defaultselection></defaultselection>
+      <defaultvalue></defaultvalue>
+      <description>Overrides the default 2-hour overlapping lookback window for this run, in minutes. Leave blank to use the script's default. Widening this is the safe way to replay a gap; the external-order-id idempotency check makes overlap harmless.</description>
+      <displayheight></displayheight>
+      <displaytype>NORMAL</displaytype>
+      <displaywidth></displaywidth>
+      <dynamicdefault></dynamicdefault>
+      <fieldtype>INTEGER</fieldtype>
+      <help></help>
+      <isformula>F</isformula>
+      <ismandatory>F</ismandatory>
+      <label>Lookback Minutes Override</label>
+      <linktext></linktext>
+      <maxlength></maxlength>
+      <maxvalue></maxvalue>
+      <minvalue></minvalue>
+      <onparentdelete></onparentdelete>
+      <searchlevel>2</searchlevel>
+      <selectrecordtype></selectrecordtype>
+      <setting></setting>
+      <storevalue>T</storevalue>
+    </scriptcustomfield>
+  </scriptcustomfields>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_demo_order_sync">
+      <buffersize>1</buffersize>
+      <concurrencylimit>1</concurrencylimit>
+      <custscript_demo_os_dry_run>T</custscript_demo_os_dry_run>
+      <custscript_demo_os_lookback_minutes></custscript_demo_os_lookback_minutes>
+      <isdeployed>T</isdeployed>
+      <loglevel>AUDIT</loglevel>
+      <queueallstagesatonce>T</queueallstagesatonce>
+      <runasrole>ADMINISTRATOR</runasrole>
+      <status>NOTSCHEDULED</status>
+      <title>Order Sync</title>
+      <yieldaftermins>60</yieldaftermins>
+      <recurrence>
+        <daily>
+          <everyxdays>1</everyxdays>
+          <repeat>PT30M</repeat>
+          <startdate>2026-09-22</startdate>
+          <starttime>00:00:00Z</starttime>
+        </daily>
+      </recurrence>
+    </scriptdeployment>
+  </scriptdeployments>
+</mapreducescript>

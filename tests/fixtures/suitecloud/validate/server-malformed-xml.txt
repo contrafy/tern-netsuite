@@ -1,0 +1,7 @@
+The validation process has encountered an error.
+Validating against 1234567_SB1 - Example Co - Administrator.
+*** ERROR ***
+
+Validation failed.
+Details: The element type "restlet" must be terminated by the matching end-tag "</restlet>".
+File: ~/Objects/customscript_tns_broken.xml

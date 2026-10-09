@@ -1,0 +1,21 @@
+The validation process has encountered an error.
+Validating against 1234567_SB1 - Example Co - Administrator.
+Validate manifest -- Success
+Validate deploy file -- Success
+Validate configuration -- Success
+Validate objects -- Success
+Validate files -- Success
+Validate folders -- Success
+Validate translation imports -- Success
+Validation of referenceability from custom objects to translations collection strings in progress. -- Success
+Validate preferences -- Success
+Validate flags -- Success
+Validate account settings -- Success
+Validate for circular dependencies -- Success
+*** ERROR ***
+
+Validation of account settings failed.
+
+An unexpected error has occurred.
+Details: The manifest contains a dependency on customrecord_tns_does_not_exist object, but it is not in the account.
+File: ~/manifest.xml

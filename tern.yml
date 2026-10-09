@@ -1,0 +1,6 @@
+---
+base: luau
+name: tern
+globals:
+  tern:
+    any: true

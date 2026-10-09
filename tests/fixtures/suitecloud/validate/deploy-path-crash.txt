@@ -1,0 +1,2 @@
+The validation process has encountered an error.
+Cannot invoke "java.util.Collection.iterator()" because "c" is null

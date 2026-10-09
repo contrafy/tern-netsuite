@@ -1,0 +1,17 @@
+<mapreducescript scriptid="customscript_demo_mapreduce">
+  <description></description>
+  <isinactive>F</isinactive>
+  <name>Demo Map/Reduce</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <scriptfile>[/SuiteScripts/demo/demo_mapreduce.js]</scriptfile>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_demo_mapreduce">
+      <isdeployed>T</isdeployed>
+      <loglevel>AUDIT</loglevel>
+      <status>NOTSCHEDULED</status>
+      <title>Demo Map/Reduce</title>
+    </scriptdeployment>
+  </scriptdeployments>
+</mapreducescript>

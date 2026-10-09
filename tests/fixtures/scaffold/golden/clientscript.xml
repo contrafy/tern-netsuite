@@ -1,0 +1,19 @@
+<clientscript scriptid="customscript_demo_clientscript">
+  <description></description>
+  <isinactive>F</isinactive>
+  <name>Demo Client</name>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <notifyuser>F</notifyuser>
+  <scriptfile>[/SuiteScripts/demo/demo_clientscript.js]</scriptfile>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_demo_clientscript">
+      <allroles>T</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>AUDIT</loglevel>
+      <recordtype>[scriptid=customrecord_demo_sprint]</recordtype>
+      <status>RELEASED</status>
+    </scriptdeployment>
+  </scriptdeployments>
+</clientscript>

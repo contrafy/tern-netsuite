@@ -1,0 +1,6 @@
+[2K[1GAuthentication ID: demo-sb
+Account Name: Example Corp
+Account ID: 1234567_SB1
+Role: Administrator
+Domain: 1234567-sb1.app.netsuite.com
+Account Type: Sandbox

@@ -1,0 +1,93 @@
+#!/bin/sh
+# Fake SuiteCloud CLI for real-Tern lens checks: prints a fixture from
+# tests/fixtures/suitecloud and exits with its recorded code. It never
+# contacts an account.
+#
+#   TNS_FAKE=<fixture>   replay tests/fixtures/suitecloud/<fixture>.txt
+#                        (e.g. validate/missing-file); otherwise the
+#                        fixture is picked from the command line
+#                        (object:list/file:list by --type/--scriptid/--folder;
+#                        object:import/file:import replay list/*-import)
+#   TNS_FAKE_FIXTURES    fixture directory (default: the repo's)
+set -u
+
+dir=${TNS_FAKE_FIXTURES:-$(CDPATH='' cd -- "$(dirname -- "$0")/../fixtures/suitecloud" && pwd)}
+
+cmd=
+server=0
+help=0
+list=0
+info=
+has_type=0
+has_scriptid=0
+has_folder=0
+while [ $# -gt 0 ]; do
+	case $1 in
+	--server) server=1 ;;
+	-h | --help) help=1 ;;
+	--list) list=1 ;;
+	--info)
+		info=${2:-}
+		[ $# -gt 1 ] && shift
+		;;
+	--type) has_type=1 ;;
+	--scriptid) has_scriptid=1 ;;
+	--folder) has_folder=1 ;;
+	-*) ;;
+	*) [ -z "$cmd" ] && cmd=$1 ;;
+	esac
+	shift
+done
+
+name=${TNS_FAKE:-}
+if [ -z "$name" ]; then
+	if [ "$help" = 1 ]; then
+		if [ -n "$cmd" ]; then
+			name=help/$(printf '%s' "$cmd" | tr ':' '-')
+		else
+			name=help/root
+		fi
+	else
+		case $cmd in
+		project:validate) if [ "$server" = 1 ]; then name=validate/server-ok; else name=validate/ok; fi ;;
+		project:deploy) name=deploy/ok ;;
+		file:upload) name=upload/ok ;;
+		project:package) name=package/ok ;;
+		project:adddependencies) name=adddependencies/none ;;
+		object:list)
+			if [ "$has_type" = 1 ] && [ "$has_scriptid" = 1 ]; then
+				name=list/object-type-scriptid
+			elif [ "$has_type" = 1 ]; then
+				name=list/object-type
+			else
+				name=list/object-all
+			fi
+			;;
+		file:list) if [ "$has_folder" = 1 ]; then name=list/file-folder; else name=list/file-no-folder; fi ;;
+		object:import) name=list/object-import ;;
+		file:import) name=list/file-import ;;
+		account:manageauth)
+			if [ "$list" = 1 ]; then
+				name=manageauth/list
+			elif [ "$info" = demo-sb ]; then
+				name=manageauth/info-sandbox
+			elif [ -n "$info" ]; then
+				name=manageauth/info-missing
+			fi
+			;;
+		esac
+	fi
+fi
+
+if [ -z "$name" ] || [ ! -f "$dir/$name.txt" ]; then
+	echo "fake suitecloud: no fixture for: ${name:-$cmd}" >&2
+	exit 2
+fi
+cat "$dir/$name.txt"
+status=0
+if [ -f "$dir/$name.exit" ]; then
+	status=$(tr -d ' \n' <"$dir/$name.exit")
+elif [ "$name" = manageauth/info-missing ]; then
+	status=1
+fi
+exit "$status"

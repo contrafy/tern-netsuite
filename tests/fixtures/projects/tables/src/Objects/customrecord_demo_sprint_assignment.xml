@@ -1,0 +1,41 @@
+<customrecordtype scriptid="customrecord_demo_sprint_assignment">
+  <recordname>Sprint Assignment</recordname>
+  <description>Employee assignment attached to a sprint.</description>
+  <accesstype>NONENEEDED</accesstype>
+  <allowattachments>F</allowattachments>
+  <allowquicksearch>T</allowquicksearch>
+  <allowuiaccess>T</allowuiaccess>
+
+  <enableoptimisticlocking>T</enableoptimisticlocking>
+  <enablesystemnotes>T</enablesystemnotes>
+  <hierarchical>F</hierarchical>
+  <includeinsearchmenu>T</includeinsearchmenu>
+  <includename>F</includename>
+  <isinactive>F</isinactive>
+  <showid>T</showid>
+  <shownotes>F</shownotes>
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_demo_sa_sprint">
+      <fieldtype>SELECT</fieldtype>
+      <label>Sprint</label>
+      <selectrecordtype>[scriptid=customrecord_demo_sprint]</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <isparent>T</isparent>
+      <onparentdelete>NO_ACTION</onparentdelete>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_demo_sa_employee">
+      <fieldtype>SELECT</fieldtype>
+      <label>Employee</label>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <accesslevel>2</accesslevel>
+      <searchlevel>2</searchlevel>
+      <storevalue>T</storevalue>
+      <showinlist>T</showinlist>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>

@@ -1,0 +1,17 @@
+<manifest projecttype="ACCOUNTCUSTOMIZATION">
+  <projectname>tables</projectname>
+  <frameworkversion>1.0</frameworkversion>
+  <dependencies>
+    <features>
+      <feature required="true">CUSTOMRECORDS</feature>
+      <feature required="true">CUSTOMSEGMENTS</feature>
+      <feature required="false">CRM</feature>
+    </features>
+    <objects>
+      <object>customlist728.val_47525_1234567_583</object>
+      <object>customrecord_cseg_acme_warehouse.custrecord_acme_cs_zip</object>
+      <object>customrecord_cseg_acme_warehouse</object>
+      <object>customrecord_cseg_acme_warehouse.tab_213_1234567_sb1_360</object>
+    </objects>
+  </dependencies>
+</manifest>

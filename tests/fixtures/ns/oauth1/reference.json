@@ -1,0 +1,43 @@
+{
+  "source": "requests-oauthlib 2.0.0 / oauthlib 3.3.1 OAuth1(signature_method='HMAC-SHA256', realm=..., nonce=..., timestamp=...) on a prepared requests.Request; credentials are the public example values from NetSuite's 'The Signature for Web Services and RESTlets' help page",
+  "credentials": {
+    "consumer_key": "ef40afdd8abaac111b13825dd5e5e2ddddb44f86d5a0dd6dcf38c20aae6b67e4",
+    "consumer_secret": "d26ad321a4b2f23b0741c8d38392ce01c3e23e109df6c96eac6d099e9ab9e8b5",
+    "token_id": "2b0ce516420110bcbd36b69e99196d1b7f6de3c6234c5afb799b73d87569f5cc",
+    "token_secret": "c29a677df7d5439a458c063654187e3d678d73aca8e3c9d8bea1478a3eb0d295"
+  },
+  "cases": [
+    {
+      "method": "GET",
+      "url": "https://123456.suitetalk.api.netsuite.com/services/rest/record/v1/employee/40",
+      "realm": "123456",
+      "nonce": "fjaLirsIcCGVZWzBX0pg",
+      "timestamp": 1508242306,
+      "authorization": "OAuth realm=\"123456\", oauth_nonce=\"fjaLirsIcCGVZWzBX0pg\", oauth_timestamp=\"1508242306\", oauth_version=\"1.0\", oauth_signature_method=\"HMAC-SHA256\", oauth_consumer_key=\"ef40afdd8abaac111b13825dd5e5e2ddddb44f86d5a0dd6dcf38c20aae6b67e4\", oauth_token=\"2b0ce516420110bcbd36b69e99196d1b7f6de3c6234c5afb799b73d87569f5cc\", oauth_signature=\"B5OIWznZ2YP0OB7VrJrGkYsTh%2B8H%2B5T9Hag%2Bo92q0zY%3D\""
+    },
+    {
+      "method": "POST",
+      "url": "https://1234567-sb1.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=customscript_acme_suiteql&deploy=customdeploy_acme_suiteql",
+      "realm": "1234567_SB1",
+      "nonce": "a1b2c3d4e5f6a7b8c9d0",
+      "timestamp": 1791500000,
+      "authorization": "OAuth realm=\"1234567_SB1\", oauth_nonce=\"a1b2c3d4e5f6a7b8c9d0\", oauth_timestamp=\"1791500000\", oauth_version=\"1.0\", oauth_signature_method=\"HMAC-SHA256\", oauth_consumer_key=\"ef40afdd8abaac111b13825dd5e5e2ddddb44f86d5a0dd6dcf38c20aae6b67e4\", oauth_token=\"2b0ce516420110bcbd36b69e99196d1b7f6de3c6234c5afb799b73d87569f5cc\", oauth_signature=\"ReYo8R63NsybY5zA17ulha4IbkzdU7l0XNC9IG%2BL1yc%3D\""
+    },
+    {
+      "method": "POST",
+      "url": "https://1234567-sb1.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?limit=1000&offset=2000",
+      "realm": "1234567_SB1",
+      "nonce": "Zz9_-.~nonce",
+      "timestamp": 1791500001,
+      "authorization": "OAuth realm=\"1234567_SB1\", oauth_nonce=\"Zz9_-.~nonce\", oauth_timestamp=\"1791500001\", oauth_version=\"1.0\", oauth_signature_method=\"HMAC-SHA256\", oauth_consumer_key=\"ef40afdd8abaac111b13825dd5e5e2ddddb44f86d5a0dd6dcf38c20aae6b67e4\", oauth_token=\"2b0ce516420110bcbd36b69e99196d1b7f6de3c6234c5afb799b73d87569f5cc\", oauth_signature=\"HRBNPnnn33ctsa3rOl7PSBO3syq6%2BoSpHtsTg62uFhg%3D\""
+    },
+    {
+      "method": "POST",
+      "url": "https://1234567-sb1.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=12&deploy=1&x=a+b%20c~d*e",
+      "realm": "1234567_SB1",
+      "nonce": "n0nce",
+      "timestamp": 1791500002,
+      "authorization": "OAuth realm=\"1234567_SB1\", oauth_nonce=\"n0nce\", oauth_timestamp=\"1791500002\", oauth_version=\"1.0\", oauth_signature_method=\"HMAC-SHA256\", oauth_consumer_key=\"ef40afdd8abaac111b13825dd5e5e2ddddb44f86d5a0dd6dcf38c20aae6b67e4\", oauth_token=\"2b0ce516420110bcbd36b69e99196d1b7f6de3c6234c5afb799b73d87569f5cc\", oauth_signature=\"iUGD9K6WN%2BW%2BbeU%2FFnAgq2tdkXcQy%2BSlTxOdfdPJkx4%3D\""
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+The validation process has encountered an error.
+The following errors were found during local validation:
+Errors for file: /work/proj/nodep/src/Objects/customscript_tns_demo.xml.
+  - Line No. 1 - Error message: When the SuiteCloud project contains a "restlet", the manifest must define the "SERVERSIDESCRIPTING" feature as required.
+Errors for file: /work/proj/nodep/src/manifest.xml.
+  - Line No. 1 - Error message: The following dependencies are missing from the manifest.xml file: [Feature - SERVERSIDESCRIPTING:required]
+

@@ -1,0 +1,2 @@
+The project is being packaged without validation. Make sure the project is validated.
+The /work/proj/clean/build/tns-demo-2026-10-09_00-00-42.zip file has been successfully created.

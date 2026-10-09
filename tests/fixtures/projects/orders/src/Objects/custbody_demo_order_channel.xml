@@ -1,0 +1,47 @@
+<transactionbodycustomfield scriptid="custbody_demo_order_channel">
+  <accesslevel>2</accesslevel>
+  <bodyassemblybuild>F</bodyassemblybuild>
+  <bodycustomerpayment>F</bodycustomerpayment>
+  <bodyinvoice>T</bodyinvoice>
+  <bodyitemfulfillment>T</bodyitemfulfillment>
+  <bodyopportunity>F</bodyopportunity>
+  <bodypurchase>F</bodypurchase>
+  <bodysale>T</bodysale>
+  <bodystore>F</bodystore>
+  <applyformatting>F</applyformatting>
+  <availableexternally>F</availableexternally>
+  <checkspelling>F</checkspelling>
+  <defaultchecked>F</defaultchecked>
+  <defaultselection></defaultselection>
+  <defaultvalue></defaultvalue>
+  <description>Channel the order came in through, copied from the order's source field: web store maps to Web, marketplace feeds map to Marketplace. Do not infer the channel from the order number prefix -- that heuristic was tested and is wrong.</description>
+  <displayheight></displayheight>
+  <displaytype>NORMAL</displaytype>
+  <displaywidth></displaywidth>
+  <dynamicdefault></dynamicdefault>
+  <encryptatrest>F</encryptatrest>
+  <fieldtype>SELECT</fieldtype>
+  <globalsearch>F</globalsearch>
+  <help></help>
+  <isformula>F</isformula>
+  <ismandatory>F</ismandatory>
+  <isparent>F</isparent>
+  <label>Order Channel</label>
+  <linktext></linktext>
+  <maxlength></maxlength>
+  <maxvalue></maxvalue>
+  <minvalue></minvalue>
+  <onparentdelete></onparentdelete>
+  <parentsubtab></parentsubtab>
+  <searchcomparefield></searchcomparefield>
+  <searchdefault></searchdefault>
+  <searchlevel>2</searchlevel>
+  <selectrecordtype>[scriptid=customlist_demo_order_channel]</selectrecordtype>
+  <showhierarchy>F</showhierarchy>
+  <showinlist>F</showinlist>
+  <sourcefilterby></sourcefilterby>
+  <sourcefrom></sourcefrom>
+  <sourcelist></sourcelist>
+  <storevalue>T</storevalue>
+  <subtab>MAIN</subtab>
+</transactionbodycustomfield>

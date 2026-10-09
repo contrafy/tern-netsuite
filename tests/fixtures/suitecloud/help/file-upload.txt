@@ -1,0 +1,14 @@
+Usage: suitecloud file:upload [options]
+
+Uploads files from your project to an account.
+
+Options:
+  -i, --interactive       Runs the file:upload command in interactive mode.
+  --paths <arguments...>  Specifies the file cabinet paths of the files to
+                          upload. To specify multiple paths, enter a space
+                          between paths and enclose the entire argument in
+                          double quotes. For example, "/SuiteScripts/file.js"
+                          for account customization projects, and
+                          "/SuiteApps/com.project.example/script.js" for
+                          SuiteApp projects.
+  -h, --help              Displays help for the command.

@@ -1,0 +1,4 @@
+The validation process has encountered an error.
+The following errors were found during local validation:
+Errors for file: /work/proj/malformed/src/Objects/customscript_tns_broken.xml.
+  - Line No. 1 - Error message: The element type "restlet" must be terminated by the matching end-tag "</restlet>".

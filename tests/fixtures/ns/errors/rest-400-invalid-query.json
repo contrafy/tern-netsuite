@@ -1,0 +1,1 @@
+{"type":"https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.1","title":"Bad Request","status":400,"o:errorDetails":[{"detail":"Invalid search query. Detailed unprocessed description follows. Search error occurred: Unknown identifier 'nope'. Available identifiers are: {scriptnote=scriptnote}.","o:errorPath":"$.*","o:errorCode":"INVALID_PARAMETER"}]}

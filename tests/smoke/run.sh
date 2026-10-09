@@ -10,6 +10,9 @@
 #                                         half its name implies (*_window.luau:
 #                                         window, else host) and call its
 #                                         register() when it returns one
+#   sh tests/smoke/run.sh --bundle-only  only (re)generate the bundle, which
+#                                         `make typecheck` needs to resolve
+#                                         load.luau's require
 #
 # Standalone luau cannot read files and gives required modules their own
 # sandboxed globals, so every plugin/*.luau source is embedded into a
@@ -62,4 +65,7 @@ ids() { # $1 = table name
 mv "$tmp" "$out"
 trap - EXIT INT TERM
 
+if [ "${1:-}" = "--bundle-only" ]; then
+	exit 0
+fi
 exec "$LUAU" tests/smoke/load.luau -a "$@"

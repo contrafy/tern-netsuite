@@ -10,7 +10,7 @@ TERN_DEFS = .tools/types/tern.lsp.d.luau
 LUAU_DIRS = $(wildcard plugin tests)
 FILTER =
 
-.PHONY: bootstrap tools fixtures test test-shell smoke smoke-real lint fmt fmt-check typecheck check
+.PHONY: bootstrap tools fixtures smoke-bundle test test-shell smoke smoke-real lint fmt fmt-check typecheck check
 
 bootstrap:
 	sh scripts/bootstrap.sh
@@ -55,7 +55,11 @@ fmt: tools
 fmt-check: tools
 	$(STYLUA) --check $(LUAU_DIRS)
 
-typecheck: tools fixtures
+# load.luau requires the generated bundle, so it must exist before analysis.
+smoke-bundle: tools
+	@LUAU=$(LUAU) sh tests/smoke/run.sh --bundle-only
+
+typecheck: tools fixtures smoke-bundle
 	$(LUAU_LSP) analyze --platform=standard --definitions=@tern=$(TERN_DEFS) --ignore='tests/smoke/.generated/**' $(LUAU_DIRS)
 
 check: fmt-check lint typecheck test test-shell smoke

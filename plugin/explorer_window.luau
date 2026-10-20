@@ -10,14 +10,28 @@
 -- for non-production accounts and asks for approval in Tern otherwise. When
 -- the guard core is missing nothing runs.
 
+local lazy = require("./lib/lazy")
 local ConfigHost = require("./config_host")
 local Context = require("./lib/account/context")
-local Link = require("./lib/explorer/link")
+local Link = lazy(function()
+	return require("./lib/explorer/link")
+end)
 local Manageauth = require("./lib/account/manageauth")
-local ProjectHost = require("./project_host")
+local ProjectHost = lazy(function()
+	return require("./project_host")
+end)
 local Resolve = require("./lib/account/resolve")
-local Symlinks = require("./lib/sdf/symlinks")
-local Upload = require("./lib/explorer/upload")
+local Symlinks = lazy(function()
+	return require("./lib/sdf/symlinks")
+end)
+local Upload = lazy(function()
+	return require("./lib/explorer/upload")
+end)
+
+-- Types of lazily required modules, read off what their functions return:
+-- `typeof` is evaluated by the type checker only, so this loads nothing.
+type Target = typeof(Upload().target(nil, nil :: any))
+type Owner = typeof(Symlinks().owners(nil :: any, "")[1])
 
 local log = tern.log
 
@@ -70,7 +84,7 @@ local function withCx(fn: (WindowCx) -> ())
 	end)
 end
 
-local function launch(cx: WindowCx, pane: number?, owner: Upload.Owner, target: Upload.Target)
+local function launch(cx: WindowCx, pane: number?, owner: Owner, target: Target)
 	local fc = owner.fileCabinetPath or owner.path
 	local guard = tern.plugin.dir .. "/" .. M.GUARD
 	if not exists(guard) then
@@ -80,8 +94,8 @@ local function launch(cx: WindowCx, pane: number?, owner: Upload.Owner, target: 
 			string.format(
 				"The deploy guard core %s is missing. Run `cd %s && suitecloud file:upload --paths %s` in a guarded terminal.",
 				guard,
-				Upload.quote(owner.root),
-				Upload.quote(fc)
+				Upload().quote(owner.root),
+				Upload().quote(fc)
 			)
 		)
 		return
@@ -90,7 +104,7 @@ local function launch(cx: WindowCx, pane: number?, owner: Upload.Owner, target: 
 		cx:toast("error", "Tern NetSuite: upload refused", owner.root .. "/" .. owner.path .. " is gone; rescan")
 		return
 	end
-	local l, err = Upload.command(owner, guard, target)
+	local l, err = Upload().command(owner, guard, target)
 	if l == nil then
 		cx:toast("error", "Tern NetSuite: upload refused", err)
 		return
@@ -113,10 +127,10 @@ end
 
 -- The account of `authId`, asking the CLI (`manageauth --info`) when the
 -- config does not list it; `cb` gets a fresh WindowCx.
-local function resolveTarget(authId: string?, cb: (WindowCx, Upload.Target) -> ())
+local function resolveTarget(authId: string?, cb: (WindowCx, Target) -> ())
 	local cfg = ConfigHost.current()
 	local function answer(cx: WindowCx)
-		cb(cx, Upload.target(authId, { config = cfg, cache = cache, now = tern.now() }))
+		cb(cx, Upload().target(authId, { config = cfg, cache = cache, now = tern.now() }))
 	end
 	if authId == nil or not Resolve.needsLookup(authId, { config = cfg, cache = cache, now = tern.now() }) then
 		withCx(answer)
@@ -187,7 +201,7 @@ local function uploadFocused(cx: WindowCx)
 		cx:toast("info", "Tern NetSuite: focus a file to upload", "Or press u on a file in the SDF explorer")
 		return
 	end
-	local file = Symlinks.normalize(path)
+	local file = Symlinks().normalize(path)
 	local cfg = ConfigHost.load().config
 	local dir = dirname(file)
 	local repo = Context.repoRoot(dir, exists)
@@ -198,7 +212,7 @@ local function uploadFocused(cx: WindowCx)
 	local gen = requestGen
 	cx:toast("info", "Tern NetSuite: finding the projects that carry " .. basename(file))
 
-	ProjectHost.discover(base, roots, function(found: { string }, _err: string?)
+	ProjectHost().discover(base, roots, function(found: { string }, _err: string?)
 		if gen ~= requestGen then
 			return
 		end
@@ -206,11 +220,11 @@ local function uploadFocused(cx: WindowCx)
 		if project and not table.find(list, project) then
 			table.insert(list, project)
 		end
-		ProjectHost.projects(list, nil, function(projects, _errors)
+		ProjectHost().projects(list, nil, function(projects, _errors)
 			if gen ~= requestGen then
 				return
 			end
-			local d = Upload.decide(Symlinks.owners(Symlinks.index(projects), file))
+			local d = Upload().decide(Symlinks().owners(Symlinks().index(projects), file))
 			if d.t == "none" then
 				withCx(function(wcx: WindowCx)
 					wcx:toast("info", "Tern NetSuite: nothing to upload", basename(file) .. ": " .. (d.reason or ""))
@@ -222,14 +236,14 @@ local function uploadFocused(cx: WindowCx)
 					end
 				end)
 			else
-				local owner = d.owner :: Upload.Owner
+				local owner = d.owner :: Owner
 				local authId: string? = nil
 				for _, p in projects do
 					if p.root == owner.root then
 						authId = p.defaultAuthId
 					end
 				end
-				resolveTarget(authId, function(wcx: WindowCx, target: Upload.Target)
+				resolveTarget(authId, function(wcx: WindowCx, target: Target)
 					launch(wcx, pane, owner, target)
 				end)
 			end
@@ -239,13 +253,13 @@ end
 
 -- `tern-netsuite://explorer/upload?grant=<id>` from the explorer block.
 function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
-	local action, id = Link.parse(link.url)
+	local action, id = Link().parse(link.url)
 	if action == nil or id == nil then
 		cx:toast("error", "Tern NetSuite: invalid explorer link", link.url)
 		return { handled = true }
 	end
-	local grant, rest, why = Link.takeGrant(tern.kv.get(Link.GRANTS_KEY), id, os.time())
-	tern.kv.set(Link.GRANTS_KEY, rest)
+	local grant, rest, why = Link().takeGrant(tern.kv.get(Link().GRANTS_KEY), id, os.time())
+	tern.kv.set(Link().GRANTS_KEY, rest)
 	if grant == nil then
 		cx:toast("error", "Tern NetSuite: upload not started", why)
 		return { handled = true }

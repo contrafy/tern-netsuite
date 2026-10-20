@@ -4,7 +4,9 @@
 #   sh tests/smoke/run.sh                 load plugin/host.luau and
 #                                         plugin/window.luau, then require the
 #                                         manifest's lenses/blocks to match the
-#                                         ones the host half defined
+#                                         ones the host half defined and each
+#                                         half's load to stay within its time
+#                                         and size budget (load.luau)
 #   sh tests/smoke/run.sh MODULE...       additionally load each plugin module
 #                                         (e.g. plugin/guard_host.luau) in the
 #                                         half its name implies (*_window.luau:

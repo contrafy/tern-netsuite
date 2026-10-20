@@ -17,3 +17,7 @@ First version.
   account health with a status-line badge.
 - Blocks fill their pane on Tern 0.7.0: row lists scroll themselves instead
   of being sized from `cx.rows`, which Tern 0.7.0 leaves at 80x24.
+- The window half loads in about half the time (155 instead of 321 KiB of
+  source at load), so a busy machine no longer pushes it past Tern's 50 ms
+  load limit ("load exceeded 50 ms"); modules it needs only later are loaded
+  on first use.

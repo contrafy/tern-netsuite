@@ -6,14 +6,26 @@
 -- which also feed the host `health` block and the status-line badge.
 -- Timer callbacks only start queries; results arrive in fetch callbacks.
 
-local Checks = require("./lib/monitor/health/checks")
+local lazy = require("./lib/lazy")
+local Checks = lazy(function()
+	return require("./lib/monitor/health/checks")
+end)
 local Config = require("./lib/config")
 local ConfigHost = require("./config_host")
 local Errors = require("./lib/ns/errors")
-local Model = require("./lib/monitor/health/model")
+local Model = lazy(function()
+	return require("./lib/monitor/health/model")
+end)
 local NsWindow = require("./ns_window")
 local Scheduler = require("./lib/monitor/scheduler")
 local StatusWindow = require("./status_window")
+
+-- Types of lazily required modules, read off what their functions return:
+-- `typeof` is evaluated by the type checker only, so this loads nothing.
+type Spec = typeof(Checks().specs(nil :: any)[1])
+type Conn = typeof(Model().conns(nil :: any)[1])
+type ConnState = typeof(Model().state(nil :: any, {}))
+type Summary = typeof(Model().summary(nil :: any, {}, 0, 0))
 
 local log = tern.log
 
@@ -35,15 +47,15 @@ local me = string.format("w%d-%d", os.time(), math.random(1, 2 ^ 30))
 local sched = Scheduler.new()
 local config: Config.Config? = nil
 local generation = 0
-local specs: { Checks.Spec } = {}
+local specs: { Spec } = {}
 local jobs: { Scheduler.Job } = {}
-local specByKey: { [string]: Checks.Spec } = {}
-local conns: { [string]: Model.Conn } = {}
+local specByKey: { [string]: Spec } = {}
+local conns: { [string]: Conn } = {}
 local order: { string } = {}
 -- os.time() when a connection was found without usable credentials.
 local disconnectedAt: { [string]: number } = {}
-local lastState: { [string]: Model.ConnState } = {}
-local latest: { [string]: Model.Summary } = {}
+local lastState: { [string]: ConnState } = {}
+local latest: { [string]: Summary } = {}
 local badgeSig = ""
 local lastCx: WindowCx? = nil
 local timer: TimerHandle? = nil
@@ -60,14 +72,14 @@ local function guarded(what: string, fn: () -> ())
 end
 
 local function updateBadges()
-	local list: { Model.Summary } = {}
+	local list: { Summary } = {}
 	for _, id in order do
 		local s = latest[id]
 		if s then
 			table.insert(list, s)
 		end
 	end
-	local map = Model.badges(list)
+	local map = Model().badges(list)
 	local keys: { string } = {}
 	for k, v in map do
 		table.insert(keys, k .. "=" .. v)
@@ -99,15 +111,15 @@ local function sync()
 	end
 	configSig = signature
 	generation += 1
-	specs = Checks.specs(cfg)
+	specs = Checks().specs(cfg)
 	jobs, specByKey = {}, {}
 	for _, s in specs do
 		table.insert(jobs, { key = s.key, group = s.connection, interval = s.interval })
 		specByKey[s.key] = s
 	end
-	local fresh: { [string]: Model.Conn } = {}
+	local fresh: { [string]: Conn } = {}
 	order = {}
-	for _, c in Model.conns(cfg) do
+	for _, c in Model().conns(cfg) do
 		local old = conns[c.id]
 		if old then
 			c.results, c.clock = old.results, old.clock
@@ -127,11 +139,11 @@ local function sync()
 	updateBadges()
 end
 
-local function publish(c: Model.Conn, now: number)
-	local s = Model.summary(c, specs, now, (config :: Config.Config).monitor.poll_seconds)
+local function publish(c: Conn, now: number)
+	local s = Model().summary(c, specs, now, (config :: Config.Config).monitor.poll_seconds)
 	pcall(tern.kv.set, M.summaryKey(c.id), s)
 	latest[c.id] = s
-	if Model.shouldToast(lastState[c.id], s.state) and lastCx then
+	if Model().shouldToast(lastState[c.id], s.state) and lastCx then
 		local cx = lastCx :: WindowCx
 		pcall(function()
 			cx:toast(
@@ -145,7 +157,7 @@ local function publish(c: Model.Conn, now: number)
 	updateBadges()
 end
 
-local function run(job: Scheduler.Job, spec: Checks.Spec, now: number)
+local function run(job: Scheduler.Job, spec: Spec, now: number)
 	local token = Scheduler.start(sched, job, now)
 	local gen = generation
 	local function onResult(result: NsWindow.Result?, qerr: Errors.NsError?)
@@ -165,11 +177,11 @@ local function run(job: Scheduler.Job, spec: Checks.Spec, now: number)
 			if qerr and qerr.kind == "auth" then
 				-- Missing or rejected credentials: stop until a config load
 				-- or a successful query (the connect flow) says otherwise.
-				Model.disconnect(c, qerr.message)
+				Model().disconnect(c, qerr.message)
 				Scheduler.pause(sched, c.id)
 				disconnectedAt[c.id] = at
 			else
-				Model.record(c, spec, Checks.evaluate(spec, if result then result.rows else nil, qerr, at, c.clock))
+				Model().record(c, spec, Checks().evaluate(spec, if result then result.rows else nil, qerr, at, c.clock))
 			end
 			publish(c, at)
 		end)
@@ -192,7 +204,7 @@ local function reconnect(now: number)
 		local c = conns[id]
 		if c and st and st.state == "ok" and st.at >= since then
 			disconnectedAt[id] = nil
-			Model.reconnect(c)
+			Model().reconnect(c)
 			Scheduler.resume(sched, id)
 			publish(c, now)
 		end
@@ -202,7 +214,7 @@ end
 local function follow()
 	for _, id in order do
 		local ok, v = pcall(tern.kv.get, M.summaryKey(id))
-		local s = if ok then Model.decode(v) else nil
+		local s = if ok then Model().decode(v) else nil
 		if s then
 			latest[id] = s
 		else
@@ -276,7 +288,7 @@ function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
 	for id in disconnectedAt do
 		local c = conns[id]
 		if c then
-			Model.reconnect(c)
+			Model().reconnect(c)
 		end
 		Scheduler.resume(sched, id)
 	end

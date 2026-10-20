@@ -7,12 +7,17 @@
 -- 0600 spool files (lib/ns/spool.luau). Window-side features (status line,
 -- timers) call `query` directly.
 
+local lazy = require("./lib/lazy")
 local Config = require("./lib/config")
 local ConfigHost = require("./config_host")
-local Credentials = require("./lib/ns/credentials")
+local Credentials = lazy(function()
+	return require("./lib/ns/credentials")
+end)
 local Endpoints = require("./lib/ns/endpoints")
 local Errors = require("./lib/ns/errors")
-local Oauth1 = require("./lib/ns/oauth1")
+local Oauth1 = lazy(function()
+	return require("./lib/ns/oauth1")
+end)
 local Oauth2 = require("./lib/ns/oauth2")
 local Query = require("./lib/ns/query")
 local Spool = require("./lib/ns/spool")
@@ -52,7 +57,7 @@ local counter = 0
 
 local function nextNonce(): string
 	counter += 1
-	return Oauth1.nonce(seed, counter)
+	return Oauth1().nonce(seed, counter)
 end
 
 local function spoolDir(): string
@@ -119,8 +124,8 @@ local function loadSecrets(conn: Connection, cb: ({ [string]: string }?, NsError
 		cb(cached, nil)
 		return
 	end
-	local fields = Credentials.FIELDS[conn.auth]
-	local why = Credentials.unstorable(conn.id, conn.auth)
+	local fields = Credentials().FIELDS[conn.auth]
+	local why = Credentials().unstorable(conn.id, conn.auth)
 	if why then
 		cb(nil, Errors.new("auth", why, Errors.NO_CREDENTIALS))
 		return
@@ -135,7 +140,7 @@ local function loadSecrets(conn: Connection, cb: ({ [string]: string }?, NsError
 		end
 	end
 	for _, f in fields do
-		local name = Credentials.secretName(conn.id, f.id) :: string
+		local name = Credentials().secretName(conn.id, f.id) :: string
 		local ok, err = try(function()
 			tern.secrets.get(name):next(function(v: string?, e: string?)
 				if done then
@@ -268,7 +273,7 @@ local function authorize(
 	local signed = table.clone(req)
 	signed.headers = headers
 	if conn.auth == "tba" then
-		headers.Authorization = Oauth1.header({
+		headers.Authorization = Oauth1().header({
 			method = req.method,
 			url = req.url,
 			realm = Endpoints.realm(accountId),
@@ -469,24 +474,24 @@ local function serveCredentials(id: string, forget: boolean)
 		return
 	end
 	local conn = target.connection
-	local why = Credentials.unstorable(conn.id, conn.auth)
+	local why = Credentials().unstorable(conn.id, conn.auth)
 	if why then
 		respond(id, failure(id, Errors.new("auth", why, Errors.NO_CREDENTIALS)))
 		return
 	end
 	local writes: { { string } } = {}
 	if forget then
-		for _, f in Credentials.FIELDS[conn.auth] do
-			table.insert(writes, { Credentials.secretName(conn.id, f.id) :: string })
+		for _, f in Credentials().FIELDS[conn.auth] do
+			table.insert(writes, { Credentials().secretName(conn.id, f.id) :: string })
 		end
 	else
-		local values, verr = Credentials.validate(conn.auth, req.values)
+		local values, verr = Credentials().validate(conn.auth, req.values)
 		if values == nil then
 			respond(id, failure(id, Errors.new("auth", verr or "invalid credentials", Errors.NO_CREDENTIALS)))
 			return
 		end
-		for _, f in Credentials.FIELDS[conn.auth] do
-			table.insert(writes, { Credentials.secretName(conn.id, f.id) :: string, values[f.id] })
+		for _, f in Credentials().FIELDS[conn.auth] do
+			table.insert(writes, { Credentials().secretName(conn.id, f.id) :: string, values[f.id] })
 		end
 	end
 	forgetCaches(conn.id)

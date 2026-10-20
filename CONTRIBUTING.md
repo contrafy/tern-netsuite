@@ -28,6 +28,12 @@ sandbox window for a few seconds and never touches your Tern config.
   `plugin/*_window.luau` adapters call `tern.*`, and they decide nothing.
 - `--!strict` in every Luau file. Small pure functions, immutable data where
   practical, early returns.
+- **Window load budget**: Tern aborts a window half whose load takes over
+  50 ms, and nearly all of it is compiling required modules. Window
+  adapters require at load only what registration, chrome formatters (4 ms
+  budget each) and their own named types need; everything else goes through
+  `plugin/lib/lazy.luau`. `make smoke` fails when a half's load exceeds its
+  budget in `tests/smoke/load.luau`.
 - Comments only where the code cannot say it (SDK constraints, safety
   reasons). No emojis in code, docs or commit messages.
 - The package is the repository root: `plugin.toml` there, and everything it

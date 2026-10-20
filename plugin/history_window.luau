@@ -5,10 +5,15 @@
 -- status line (`ciSegment`). The segment only reads caches; window events
 -- and a poll timer refresh them with read-only git and `gh run list` runs.
 
+local lazy = require("./lib/lazy")
 local Ci = require("./lib/history/ci")
 local ConfigHost = require("./config_host")
-local Git = require("./lib/history/git")
-local Link = require("./lib/history/link")
+local Git = lazy(function()
+	return require("./lib/history/git")
+end)
+local Link = lazy(function()
+	return require("./lib/history/link")
+end)
 local Settings = require("./lib/history/settings")
 
 local log = tern.log
@@ -101,9 +106,9 @@ local function refresh(cwd: string?, force: boolean?)
 		return
 	end
 	inflightRepo[cwd] = true
-	run(Git.argv(cwd, false), { timeout_ms = M.GIT_TIMEOUT_MS }, function(r: ProcessResult)
+	run(Git().argv(cwd, false), { timeout_ms = M.GIT_TIMEOUT_MS }, function(r: ProcessResult)
 		inflightRepo[cwd] = nil
-		local info = Git.parse(r.stdout)
+		local info = Git().parse(r.stdout)
 		local before = repos[cwd]
 		if before == nil then
 			if repoCount >= M.MAX_REPOS then
@@ -112,7 +117,7 @@ local function refresh(cwd: string?, force: boolean?)
 			end
 			repoCount += 1
 		end
-		local github = Git.github(info.remote)
+		local github = Git().github(info.remote)
 		repos[cwd] = { at = tern.now(), github = github, branch = info.branch }
 		if github then
 			fetchRuns(c, github, force == true)
@@ -164,7 +169,7 @@ function M.ciSegment(pane: StatusPaneInfo): StatusSegment?
 end
 
 function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
-	local parsed = Link.parse(link.url)
+	local parsed = Link().parse(link.url)
 	if parsed == nil then
 		cx:toast("error", "Tern NetSuite: unknown history link", link.url)
 		return { handled = true }

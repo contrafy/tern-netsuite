@@ -6,9 +6,14 @@
 -- import in a split under the clicked pane, in the project directory so the
 -- CLI picks the project's auth ID.
 
+local lazy = require("./lib/lazy")
 local ConfigHost = require("./config_host")
-local Imports = require("./lib/browser/imports")
-local Link = require("./lib/browser/link")
+local Imports = lazy(function()
+	return require("./lib/browser/imports")
+end)
+local Link = lazy(function()
+	return require("./lib/browser/link")
+end)
 
 local log = tern.log
 
@@ -29,8 +34,8 @@ local function focusedCwd(cx: WindowCx): string?
 end
 
 local function runImport(link: LinkRequest, cx: WindowCx, id: string)
-	local grant, rest, why = Link.takeGrant(tern.kv.get(Link.GRANTS_KEY), id, os.time())
-	tern.kv.set(Link.GRANTS_KEY, rest)
+	local grant, rest, why = Link().takeGrant(tern.kv.get(Link().GRANTS_KEY), id, os.time())
+	tern.kv.set(Link().GRANTS_KEY, rest)
 	if grant == nil then
 		cx:toast("error", "Tern NetSuite: import not started", why)
 		return
@@ -40,12 +45,12 @@ local function runImport(link: LinkRequest, cx: WindowCx, id: string)
 		cx:toast("error", "Tern NetSuite: import not started", req.root .. " is no longer an SDF project")
 		return
 	end
-	local argv, err = Imports.argv(ConfigHost.current().suitecloud.program, req)
+	local argv, err = Imports().argv(ConfigHost.current().suitecloud.program, req)
 	if argv == nil then
 		cx:toast("error", "Tern NetSuite: import not started", err)
 		return
 	end
-	local line = Imports.commandLine(argv)
+	local line = Imports().commandLine(argv)
 	local at = if link.pane ~= 0 then link.pane else cx.session:focused()
 	-- A shell pane, not a `command` launch: a command pane closes when the
 	-- command exits, taking its output with it.
@@ -60,14 +65,14 @@ local function runImport(link: LinkRequest, cx: WindowCx, id: string)
 end
 
 function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
-	local parsed = Link.parse(link.url)
+	local parsed = Link().parse(link.url)
 	if parsed == nil then
 		cx:toast("error", "Tern NetSuite: invalid browser link", link.url)
 		return { handled = true }
 	end
 	if parsed.t == "browse" then
 		local cwd = parsed.cwd
-		return { block = Link.BLOCK, args = if cwd then { cwd } else {} }
+		return { block = Link().BLOCK, args = if cwd then { cwd } else {} }
 	end
 	runImport(link, cx, parsed.id :: string)
 	return { handled = true }
@@ -80,7 +85,7 @@ function M.register()
 		icon = "cloud",
 		run = function(cx: WindowCx)
 			local cwd = focusedCwd(cx)
-			if cx:new_block(Link.BLOCK, if cwd then { cwd } else {}, "beside") == nil then
+			if cx:new_block(Link().BLOCK, if cwd then { cwd } else {}, "beside") == nil then
 				cx:toast("error", "Tern NetSuite is not loaded on this host")
 			end
 		end,

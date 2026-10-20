@@ -1,10 +1,10 @@
 --!strict
--- The pane size a block can rely on. Tern 0.7.0 creates every plugin block
--- with cx.cols/cx.rows at its 80x24 placeholder and never calls `resize` or
--- updates them, whatever the real size (measured in a sandbox: open beside,
--- below, in a tab, zoomed or after a window resize). Views therefore never
--- size row lists from the height (ui.scroll fills the pane instead) and only
--- use a size Tern actually measured, for column layouts and paging.
+-- The pane size a block can rely on. Tern creates every plugin block with
+-- cx.cols/cx.rows at an 80x24 placeholder. Tern 0.8.3 then calls `resize`
+-- with the real size (and updates cx) right after the first view, and again
+-- whenever the pane changes (split, zoom, tab, window resize; measured in a
+-- sandbox). Tern 0.7.0 never did, so the placeholder alone is never trusted:
+-- a size counts after a `resize` callback or when it differs from it.
 
 local M = {}
 

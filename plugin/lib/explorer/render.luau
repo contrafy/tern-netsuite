@@ -135,7 +135,7 @@ function M.view(s: Types.State): { main: Node, dock: Node }
 	local selected = State.selectedIndex(s, rows)
 	local first, last = State.window(s, rows, selected)
 	if first > 1 then
-		table.insert(main, ui.muted(string.format("↑ %d more above (k, pageup, g)", first - 1), { key = "above" }))
+		table.insert(main, ui.muted(string.format("↑ %d more above (k, PageUp, g)", first - 1), { key = "above" }))
 	end
 	local list: { Node } = {}
 	for i = first, last do
@@ -148,7 +148,7 @@ function M.view(s: Types.State): { main: Node, dock: Node }
 	if last < #rows then
 		table.insert(
 			main,
-			ui.muted(string.format("↓ %d more below (j, pagedown, G; / filters)", #rows - last), { key = "below" })
+			ui.muted(string.format("↓ %d more below (j, PageDown, G; / filters)", #rows - last), { key = "below" })
 		)
 	end
 

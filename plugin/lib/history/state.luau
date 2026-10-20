@@ -70,7 +70,7 @@ export type Init = { cwd: string?, settings: Settings.Settings, decode: (string)
 
 local M = {}
 
--- Rows moved by pageup/pagedown.
+-- Rows moved by PageUp/PageDown.
 M.PAGE = 10
 -- Audit-log lines read; the guard never rotates that file.
 M.MAX_GUARD_LINES = 1000
@@ -82,8 +82,8 @@ for _, k in
 		"k",
 		"down",
 		"up",
-		"pagedown",
-		"pageup",
+		"page_down",
+		"page_up",
 		"g",
 		"G",
 		"home",
@@ -217,9 +217,9 @@ local function key(s: State, name: string): { Effect }
 		move(s, 1)
 	elseif name == "k" or name == "up" then
 		move(s, -1)
-	elseif name == "pagedown" then
+	elseif name == "page_down" then
 		move(s, M.PAGE)
-	elseif name == "pageup" then
+	elseif name == "page_up" then
 		move(s, -M.PAGE)
 	elseif name == "g" or name == "home" then
 		move(s, nil, 1)

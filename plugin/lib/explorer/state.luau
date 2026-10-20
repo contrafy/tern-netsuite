@@ -518,9 +518,9 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 		move(s, 1)
 	elseif ch == "k" or name == "up" then
 		move(s, -1)
-	elseif name == "pagedown" or name == "pageup" then
+	elseif name == "page_down" or name == "page_up" then
 		local page = math.max(1, M.viewport(s) - 1)
-		move(s, if name == "pagedown" then page else -page)
+		move(s, if name == "page_down" then page else -page)
 	elseif name == "home" or ch == "g" then
 		move(s, 0, 1)
 	elseif name == "end" or ch == "G" then

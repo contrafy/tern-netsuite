@@ -321,6 +321,17 @@ describe("filters", function()
 		s = keys(s, { "down", "down" })
 		expect(s.selected).toBe(1)
 	end)
+
+	it("pages and jumps with the keys Tern sends (page_down, page_up, G as shift+g)", function()
+		local s = keys(listed(), { "page_down" })
+		expect(s.selected).toBe(1 + State.PAGE)
+		s = keys(s, { "page_up" })
+		expect(s.selected).toBe(1)
+		s = step(s, { t = "key", name = "g", text = "G", shift = true })
+		expect(s.selected).toBe(137)
+		s = keys(s, { "g" })
+		expect(s.selected).toBe(1)
+	end)
 end)
 
 -- Selects the entry with id `id` through the search box.

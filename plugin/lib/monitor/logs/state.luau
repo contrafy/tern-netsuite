@@ -457,9 +457,9 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 		move(s, 1)
 	elseif ch == "k" or name == "up" then
 		move(s, -1)
-	elseif name == "pagedown" then
+	elseif name == "page_down" then
 		move(s, page)
-	elseif name == "pageup" then
+	elseif name == "page_up" then
 		move(s, -page)
 	elseif ch == "g" or name == "home" then
 		s.selId = nil

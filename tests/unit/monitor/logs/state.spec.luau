@@ -235,6 +235,23 @@ describe("the execution log block", function()
 		expect(State.detail(s)).toBeNil()
 	end)
 
+	it("pages and jumps with the keys Tern sends (page_down, page_up, G as shift+g, home, end)", function()
+		local s = loaded()
+		local newest = selId(s)
+		local list = State.visible(s)
+		local oldest = list[#list].id
+		s = press(s, "page_down")
+		expect(selId(s)).toBe(oldest)
+		s = press(s, "page_up")
+		expect(selId(s)).toBe(newest)
+		s = State.update(s, { t = "key", key = key("g", "G", { shift = true }) })
+		expect(selId(s)).toBe(oldest)
+		s = press(s, "home")
+		expect(selId(s)).toBe(newest)
+		s = press(s, "end")
+		expect(selId(s)).toBe(oldest)
+	end)
+
 	it("keeps the selected row selected while new rows arrive above it", function()
 		local s, effects = loaded()
 		local timer = only(effects, "timer") :: State.Effect

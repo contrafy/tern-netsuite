@@ -21,3 +21,7 @@ First version.
   source at load), so a busy machine no longer pushes it past Tern's 50 ms
   load limit ("load exceeded 50 ms"); modules it needs only later are loaded
   on first use.
+- PageUp/PageDown work in the explorer, browser, history and logs blocks
+  (Tern names them `page_up` / `page_down`).
+- Row lists keep the selected row visible in short panes; the key hints give
+  way first.

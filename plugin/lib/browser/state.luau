@@ -490,9 +490,9 @@ local function key(s: State, msg: any, effects: { Effect }): boolean
 		move(s, 1)
 	elseif name == "up" or name == "k" then
 		move(s, -1)
-	elseif name == "pagedown" then
+	elseif name == "page_down" then
 		move(s, M.PAGE)
-	elseif name == "pageup" then
+	elseif name == "page_up" then
 		move(s, -M.PAGE)
 	elseif name == "home" or (name == "g" and not msg.shift) then
 		s.selected = 1

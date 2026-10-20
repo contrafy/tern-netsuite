@@ -1,16 +1,46 @@
 /* Tern NetSuite blocks.
 
-   Row lists (lib/ui.luau `scroll`): Tern 0.7.0 never tells a block its pane
-   size (lib/pane.luau), so a block cannot size its rows to the pane. The
-   list takes the height the main region has left below the header and
-   scrolls itself; Tern scrolls it to the selected row (`selected` + `max`).
-   Below a few rows the main region scrolls instead. */
+   Row lists (lib/ui.luau `scroll`) take the height the main region has
+   left below the header and scroll themselves; Tern scrolls them to the
+   selected row (`selected` + `max`) when the selection changes. The list
+   never shrinks below two lines, so the selected row stays visible. */
 .sf-main[data-surface^="plugin.tern-netsuite."] > .sf-list[data-role="tern-netsuite.scroll"] {
 	flex: 1 1 0;
-	min-height: 100px;
+	min-height: 2.5em;
 }
 
 .sf-main[data-surface^="plugin.tern-netsuite."] > .sf-list[data-role="tern-netsuite.scroll"] > .sf-list-scroll {
 	flex: 1 1 0;
 	min-height: 0;
+}
+
+/* In a short pane the key hints in the dock give way to the list: the main
+   region keeps room for its header plus two list lines (or the whole pane
+   when that is less), and the dock gets what is left, clipped. Each minimum
+   is the block's usual header height plus the list's 2.5em; a taller header
+   (a wrapped filter row, an error line) only makes the main region scroll
+   again. Tall panes are unaffected. */
+.sf-main[data-surface="plugin.tern-netsuite.history"] {
+	min-height: min(6em, 100%);
+}
+
+.sf-main[data-surface="plugin.tern-netsuite.explorer"] {
+	min-height: min(8em, 100%);
+}
+
+.sf-main[data-surface="plugin.tern-netsuite.logs"] {
+	min-height: min(11.5em, 100%);
+}
+
+.sf-main[data-surface="plugin.tern-netsuite.browser"] {
+	min-height: min(16.5em, 100%);
+}
+
+.sf-dock[data-surface="plugin.tern-netsuite.explorer"],
+.sf-dock[data-surface="plugin.tern-netsuite.browser"],
+.sf-dock[data-surface="plugin.tern-netsuite.history"],
+.sf-dock[data-surface="plugin.tern-netsuite.logs"] {
+	flex-shrink: 1;
+	min-height: 0;
+	overflow: hidden;
 }

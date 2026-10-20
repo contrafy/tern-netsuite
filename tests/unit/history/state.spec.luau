@@ -147,6 +147,22 @@ describe("navigating the history", function()
 		expect(s.sel).toBe(items[4].key)
 	end)
 
+	it("pages and jumps with the PageDown/PageUp/Home/End keys under the names Tern sends", function()
+		local s = loaded(false)
+		local items = State.visible(s)
+		for _, name in { "page_down", "page_up", "home", "end" } do
+			expect(State.handles(name)).toBe(true)
+		end
+		s = key(s, "page_down")
+		expect(s.sel).toBe(items[4].key)
+		s = key(s, "page_up")
+		expect(s.sel).toBe(items[1].key)
+		s = key(s, "end")
+		expect(s.sel).toBe(items[4].key)
+		s = key(s, "home")
+		expect(s.sel).toBe(items[1].key)
+	end)
+
 	it("opens details with enter; escape goes back, then closes the block", function()
 		local s = key(loaded(false), "enter")
 		expect(s.detail).toBe(true)

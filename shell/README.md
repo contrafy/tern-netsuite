@@ -165,6 +165,10 @@ the alias still wins for commands typed in that shell).
 - A per-command `projectFolder` in `suitecloud.config.js` is noted but the
   guard fingerprints the default project folder.
 - `ahead`/`behind` use the last fetched upstream; the guard never fetches.
+- macOS's `/bin/bash` (3.2) does not load Tern's shell integration, so Tern
+  sees no commands in such a pane: the SuiteCloud lens and deploy history
+  stay silent there (the guard itself still works). Use zsh, fish or a newer
+  bash.
 
 ## Tests
 

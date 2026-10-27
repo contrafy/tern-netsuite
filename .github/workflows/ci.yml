@@ -111,7 +111,9 @@ jobs:
               if path in seen:
                   continue
               seen.add(path)
-              for spec in re.findall(r'require\(\s*"([^"]+)"\s*\)', path.read_text()):
+              # Line comments may quote require calls (lib/lazy.luau's usage).
+              code = "\n".join(l for l in path.read_text().splitlines() if not l.lstrip().startswith("--"))
+              for spec in re.findall(r'require\(\s*"([^"]+)"\s*\)', code):
                   if not spec.startswith(("./", "../")):
                       errors.append(f"{path}: require {spec!r} is not relative")
                       continue

@@ -43,6 +43,9 @@ export type Connection = {
 	auth: Auth,
 	transport: Transport,
 	read_only: boolean,
+	-- Script deployment changes through the REST record API; off unless the
+	-- connection opts in. Every change still needs approval.
+	allow_deployment_changes: boolean,
 	timeout_ms: number,
 	restlet: Restlet?,
 }
@@ -78,6 +81,7 @@ export type Config = {
 	},
 	status: { enabled: boolean },
 	scaffold: { templates_dir: string? },
+	console: { saved_dirs: { string }, max_rows: number },
 	history: HistorySettings.Settings,
 }
 
@@ -125,6 +129,7 @@ function M.defaults(): Config
 		},
 		status = { enabled = true },
 		scaffold = {},
+		console = { saved_dirs = {}, max_rows = 1000 },
 		history = HistorySettings.defaults(),
 	}
 	return freezeDeep(cfg)
@@ -463,7 +468,12 @@ end
 local function connections(ctx: Ctx, v: any, path: string, accountIds: { [string]: boolean }): { Connection }
 	local ids: { [string]: boolean } = {}
 	return records(ctx, v, path, function(raw: any, p: string): Connection?
-		unknownKeys(ctx, raw, p, { "id", "account", "auth", "transport", "read_only", "timeout_ms", "restlet" })
+		unknownKeys(
+			ctx,
+			raw,
+			p,
+			{ "id", "account", "auth", "transport", "read_only", "allow_deployment_changes", "timeout_ms", "restlet" }
+		)
 		local id = required(ctx, raw.id, p .. ".id")
 		local account = required(ctx, raw.account, p .. ".account")
 		if id == nil or account == nil then
@@ -510,6 +520,7 @@ local function connections(ctx: Ctx, v: any, path: string, accountIds: { [string
 			auth = auth :: Auth,
 			transport = transport :: Transport,
 			read_only = bool(ctx, raw.read_only, p .. ".read_only", true),
+			allow_deployment_changes = bool(ctx, raw.allow_deployment_changes, p .. ".allow_deployment_changes", false),
 			timeout_ms = int(ctx, raw.timeout_ms, p .. ".timeout_ms", 30000, 1000, 300000),
 			restlet = rl,
 		}
@@ -592,6 +603,7 @@ local TOP = {
 	"monitor",
 	"status",
 	"scaffold",
+	"console",
 	"history",
 }
 
@@ -632,6 +644,7 @@ local function build(ctx: Ctx, root: { [string]: any }): Config
 	local dse = d.monitor.script_errors
 	local st = section(ctx, root.status, "status", { "enabled" })
 	local sf = section(ctx, root.scaffold, "scaffold", { "templates_dir" })
+	local co = section(ctx, root.console, "console", { "saved_dirs", "max_rows" })
 
 	local accts = accounts(ctx, root.accounts, "accounts")
 	local accountIds: { [string]: boolean } = {}
@@ -710,6 +723,11 @@ local function build(ctx: Ctx, root: { [string]: any }): Config
 		},
 		status = { enabled = bool(ctx, st.enabled, "status.enabled", d.status.enabled) },
 		scaffold = { templates_dir = str(ctx, sf.templates_dir, "scaffold.templates_dir", nil) },
+		console = {
+			saved_dirs = strList(ctx, co.saved_dirs, "console.saved_dirs", d.console.saved_dirs),
+			-- REST SuiteQL cannot page past offset 100000.
+			max_rows = int(ctx, co.max_rows, "console.max_rows", d.console.max_rows, 1, 100000),
+		},
 		history = HistorySettings.parse(
 			root.history,
 			function(level: "error" | "warning", path: string, message: string)

@@ -238,6 +238,7 @@ describe("connections", function()
 		expect(c.auth).toBe("tba")
 		expect(c.transport).toBe("rest")
 		expect(c.restlet).toBeNil()
+		expect(c.allow_deployment_changes).toBe(false)
 	end)
 
 	it("drops a connection naming an unknown account", function()
@@ -295,6 +296,39 @@ describe("connections", function()
 			parse('{"accounts": [' .. ACCOUNT .. '], "connections": [{"id": "c", "account": "sb", "auth": "basic"}]}')
 		expect(cfg.connections).toEqual({})
 		expect(levelOf(diags, "connections[1].auth")).toBe("error")
+	end)
+
+	it("enables deployment changes only when the connection opts in explicitly", function()
+		local cfg, diags = parse(
+			'{"accounts": ['
+				.. ACCOUNT
+				.. '], "connections": [{"id": "c", "account": "sb", "allow_deployment_changes": true},'
+				.. ' {"id": "d", "account": "sb", "allow_deployment_changes": "yes"}]}'
+		)
+		expect(cfg.connections[1].allow_deployment_changes).toBe(true)
+		expect(cfg.connections[2].allow_deployment_changes).toBe(false)
+		expect(levelOf(diags, "connections[2].allow_deployment_changes")).toBe("error")
+	end)
+end)
+
+describe("SuiteQL console", function()
+	it("keeps saved queries in plugin data only, until the user names folders to share", function()
+		local cfg = Config.defaults()
+		expect(cfg.console.saved_dirs).toEqual({})
+		expect(cfg.console.max_rows).toBe(1000)
+	end)
+
+	it("accepts shared .sql folders and a row cap within the REST paging limit", function()
+		local cfg, diags = parse('{"console": {"saved_dirs": ["suiteql", "~/team/sql"], "max_rows": 5000}}')
+		expect(cfg.console.saved_dirs).toEqual({ "suiteql", "~/team/sql" })
+		expect(cfg.console.max_rows).toBe(5000)
+		expect(#diags).toBe(0)
+	end)
+
+	it("refuses a row cap above what one REST SuiteQL query can page to", function()
+		local cfg, diags = parse('{"console": {"max_rows": 200000}}')
+		expect(cfg.console.max_rows).toBe(1000)
+		expect(levelOf(diags, "console.max_rows")).toBe("error")
 	end)
 end)
 

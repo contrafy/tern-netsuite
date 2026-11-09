@@ -60,6 +60,46 @@ function M.parseLink(url: string): (Action?, string?)
 	return action :: Action, id
 end
 
+-- Every request the host half makes is recorded under tern.kv
+-- `ns.pending.<id>` before its link opens; the window serves a link only
+-- when it can take (remove) that record for the same action, so a request
+-- file dropped by anything else is never served. Credential changes also
+-- need `origin = "connect"` (the connect block) and the same connection.
+M.PENDING_PREFIX = "ns.pending."
+M.PENDING_TTL_SECONDS = 60
+
+export type Origin = "query" | "connect"
+export type Pending = { action: Action, origin: Origin, connection: string, exp: number }
+
+function M.pendingKey(id: string): string
+	return M.PENDING_PREFIX .. id
+end
+
+function M.pending(action: Action, origin: Origin, connection: string, now: number): Pending
+	return { action = action, origin = origin, connection = connection, exp = now + M.PENDING_TTL_SECONDS }
+end
+
+-- Why the stored record (already removed from kv) does not authorize
+-- `action` now, or nil. kv round-trips JSON, so every field is checked.
+function M.checkPending(stored: any, action: string, now: number): string?
+	if type(stored) ~= "table" then
+		return "this NetSuite link was not created by Tern NetSuite or was already used"
+	end
+	if stored.action ~= action then
+		return "this NetSuite link does not match the request it names"
+	end
+	if type(stored.exp) ~= "number" or stored.exp < now then
+		return "this NetSuite link expired"
+	end
+	if type(stored.connection) ~= "string" or stored.connection == "" then
+		return "the recorded NetSuite request is malformed"
+	end
+	if action ~= "query" and stored.origin ~= "connect" then
+		return "credentials change only from Tern NetSuite: Connect account"
+	end
+	return nil
+end
+
 function M.dir(data: string): string
 	return data .. "/ns"
 end

@@ -78,6 +78,11 @@ local function try(f: () -> ()): (boolean, string?)
 end
 
 local function deliver(p: Pending, resp: Spool.Response)
+	if not resp.ok and type(resp.id) == "string" then
+		-- An unanswered request leaves its record behind; the window removes
+		-- the record of every request it serves.
+		pcall(tern.kv.set, Spool.pendingKey(resp.id), nil)
+	end
 	local ok, err = try(function()
 		p.cb(resp)
 	end)
@@ -152,6 +157,7 @@ end
 local function exchange(
 	cx: EffectCx,
 	action: Spool.Action,
+	origin: Spool.Origin,
 	kind: Spool.Kind,
 	payload: { [string]: any },
 	timeoutMs: number,
@@ -164,6 +170,7 @@ local function exchange(
 	local dir = spoolDir()
 	local path = Spool.path(dir, kind, id)
 	local text = tern.json.encode(payload)
+	local key = Spool.pendingKey(id)
 	local function fail(message: string)
 		deliver({ deadline = 0, request = path, reading = false, cb = cb }, {
 			v = Spool.VERSION,
@@ -178,6 +185,15 @@ local function exchange(
 				fail("could not write the request file: " .. r.stderr)
 				return
 			end
+			-- The window serves only links it can match to this record.
+			local recorded, kerr = try(function()
+				tern.kv.set(key, Spool.pending(action, origin, payload.connection, os.time()))
+			end)
+			if not recorded then
+				pcall(tern.fs.remove, path)
+				fail("could not record the request: " .. tostring(kerr))
+				return
+			end
 			pending[id] = { deadline = tern.now() + timeoutMs, request = path, reading = false, cb = cb }
 			local opened, oerr = try(function()
 				cx:open(Spool.link(action, id))
@@ -185,6 +201,7 @@ local function exchange(
 			if not opened then
 				pending[id] = nil
 				pcall(tern.fs.remove, path)
+				pcall(tern.kv.set, key, nil)
 				fail("could not reach the window: " .. tostring(oerr))
 				return
 			end
@@ -249,6 +266,7 @@ function M.query(connectionId: string, sql: string, params: { any }?, opts: Quer
 		opts.cx,
 		"query",
 		"query",
+		"query",
 		{
 			connection = connectionId,
 			sql = sql,
@@ -280,15 +298,22 @@ end
 
 -- Hands credential values to the window half, which validates them and
 -- stores them in the keychain. `values` never appear in a URL or a log.
-function M.storeCredentials(cx: EffectCx, connectionId: string, values: { [string]: string }, cb: (err: NsError?) -> ())
-	exchange(cx, "store", "cred", { connection = connectionId, values = values }, ROUND_TRIP_MS, function(resp)
+-- Only the connect block below changes credentials.
+local function storeCredentials(
+	cx: EffectCx,
+	connectionId: string,
+	values: { [string]: string },
+	cb: (err: NsError?) -> ()
+)
+	local payload = { connection = connectionId, values = values }
+	exchange(cx, "store", "connect", "cred", payload, ROUND_TRIP_MS, function(resp)
 		cb(if resp.ok then nil else resp.error)
 	end)
 end
 
 -- Deletes the connection's stored credentials.
-function M.forgetCredentials(cx: EffectCx, connectionId: string, cb: (err: NsError?) -> ())
-	exchange(cx, "forget", "cred", { connection = connectionId, values = {} }, ROUND_TRIP_MS, function(resp)
+local function forgetCredentials(cx: EffectCx, connectionId: string, cb: (err: NsError?) -> ())
+	exchange(cx, "forget", "connect", "cred", { connection = connectionId, values = {} }, ROUND_TRIP_MS, function(resp)
 		cb(if resp.ok then nil else resp.error)
 	end)
 end
@@ -343,7 +368,7 @@ local function run(st: BlockState, effect: Connect.Effect, cx: BlockCx)
 			return
 		end
 		st.ui = Connect.busy(st.ui, "saving", "Saving to the keychain...")
-		M.storeCredentials(cx, tg.id, values, function(err: NsError?)
+		storeCredentials(cx, tg.id, values, function(err: NsError?)
 			if err then
 				st.ui = Connect.settle(st.ui, { tone = "error", text = "The credentials were not saved.", error = err })
 				rerender(st)
@@ -354,7 +379,7 @@ local function run(st: BlockState, effect: Connect.Effect, cx: BlockCx)
 		end)
 	elseif effect == "forget" then
 		st.ui = Connect.busy(st.ui, "saving", "Removing the stored credentials...")
-		M.forgetCredentials(cx, tg.id, function(err: NsError?)
+		forgetCredentials(cx, tg.id, function(err: NsError?)
 			st.ui = if err
 				then Connect.settle(st.ui, { tone = "error", text = "The credentials were not removed.", error = err })
 				else Connect.settle(st.ui, { tone = "success", text = "Stored credentials removed." }, true)

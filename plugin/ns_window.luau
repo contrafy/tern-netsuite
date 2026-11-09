@@ -407,7 +407,7 @@ local function claim(path: string, max: number): string?
 	return if ok then text else nil
 end
 
-local function serveQuery(id: string)
+local function serveQuery(id: string, recorded: string)
 	local text = claim(Spool.path(spoolDir(), "query", id), Spool.MAX_REQUEST_BYTES)
 	if text == nil then
 		return
@@ -415,6 +415,10 @@ local function serveQuery(id: string)
 	local req, err = Spool.decodeQuery(text, id, os.time(), tern.json.decode)
 	if req == nil then
 		respond(id, failure(id, Errors.new("query", err or "unreadable request")))
+		return
+	end
+	if req.connection ~= recorded then
+		respond(id, failure(id, Errors.new("query", "the request names another connection than was recorded")))
 		return
 	end
 	local started = tern.now()
@@ -456,7 +460,7 @@ local function setSecrets(names: { { string } }, i: number, cb: (string?) -> ())
 	end
 end
 
-local function serveCredentials(id: string, forget: boolean)
+local function serveCredentials(id: string, forget: boolean, recorded: string, cx: WindowCx)
 	local text = claim(Spool.path(spoolDir(), "cred", id), Spool.MAX_CREDENTIAL_BYTES)
 	if text == nil then
 		return
@@ -465,6 +469,10 @@ local function serveCredentials(id: string, forget: boolean)
 	text = nil
 	if req == nil then
 		respond(id, failure(id, Errors.new("auth", err or "unreadable request", Errors.NO_CREDENTIALS)))
+		return
+	end
+	if req.connection ~= recorded then
+		respond(id, failure(id, Errors.new("auth", "the request names another connection than the connect block")))
 		return
 	end
 	ConfigHost.load()
@@ -500,10 +508,23 @@ local function serveCredentials(id: string, forget: boolean)
 		if serr then
 			respond(id, failure(id, Errors.new("auth", "the keychain refused the credentials: " .. serr)))
 		else
+			pcall(function()
+				cx:toast(
+					"info",
+					string.format(
+						"Tern NetSuite: %s the stored credentials of connection %q",
+						if forget then "removed" else "replaced",
+						conn.id
+					)
+				)
+			end)
 			respond(id, { v = Spool.VERSION, id = id, ok = true })
 		end
 	end)
 end
+
+local PENDING_TRIES = 10
+local PENDING_RETRY_MS = 50
 
 -- Handles `tern-netsuite://ns/...`; window.luau dispatches area "ns" here.
 function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
@@ -512,12 +533,35 @@ function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
 		cx:toast("error", "Tern NetSuite: unknown NetSuite link", link.url)
 		return { handled = true }
 	end
-	if action == "query" then
-		ConfigHost.load()
-		serveQuery(id)
-	else
-		serveCredentials(id, action == "forget")
+	-- Served only when the host half recorded this id for this action; the
+	-- record is removed first, so a link works once. The host sets it just
+	-- before opening the link; a VM notices another's kv write on its next
+	-- read, so a missing record is looked up again for a moment.
+	local key = Spool.pendingKey(id)
+	local tries = 0
+	local function attempt()
+		tries += 1
+		local okGet, stored = pcall(tern.kv.get, key)
+		if okGet and stored ~= nil then
+			pcall(tern.kv.set, key, nil)
+		elseif tries < PENDING_TRIES then
+			tern.timer(PENDING_RETRY_MS, attempt)
+			return
+		end
+		local why = Spool.checkPending(if okGet then stored else nil, action, os.time())
+		if why then
+			pcall(tern.fs.remove, Spool.path(spoolDir(), if action == "query" then "query" else "cred", id))
+			pcall(function()
+				cx:toast("error", "Tern NetSuite: " .. why)
+			end)
+		elseif action == "query" then
+			ConfigHost.load()
+			serveQuery(id, stored.connection)
+		else
+			serveCredentials(id, action == "forget", stored.connection, cx)
+		end
 	end
+	attempt()
 	return { handled = true }
 end
 

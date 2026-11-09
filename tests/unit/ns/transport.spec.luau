@@ -25,6 +25,7 @@ local function conn(transport: Config.Transport, readOnly: boolean?): Config.Con
 		auth = "tba",
 		transport = transport,
 		read_only = if readOnly == nil then true else readOnly,
+		allow_deployment_changes = false,
 		timeout_ms = 30000,
 		restlet = if transport == "restlet" then RESTLET else nil,
 	}

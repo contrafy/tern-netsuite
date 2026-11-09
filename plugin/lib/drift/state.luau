@@ -18,8 +18,10 @@
 -- another auth ID (configured accounts' auth_ids and `account:manageauth
 -- --list`). The last complete result per project and auth ID is cached
 -- (cache.luau); opening the block shows it and r rescans the project and
--- runs again. Without a cache the block runs at once, unless it was opened
--- from a bare link (`held`): then nothing runs before Enter.
+-- runs again. Without a cache the block runs at once when the target is a
+-- non-production account, once --info has classified it if it must; a
+-- production or unclassified target, or a bare link (`held`), waits for
+-- Enter.
 
 local Cache = require("./cache")
 local Classify = require("../account/classify")
@@ -111,6 +113,8 @@ export type State = {
 	cached: boolean,
 	-- The cache file was read for this generation.
 	loaded: boolean,
+	-- No cache and not held: run once --info classifies the target.
+	autoPending: boolean,
 	run: Run?,
 	runSeq: number,
 	-- The result a running full run replaces; cancel brings it back.
@@ -236,6 +240,7 @@ function M.init(args: InitArgs): (State, { Effect })
 		result = nil,
 		cached = false,
 		loaded = false,
+		autoPending = false,
 		run = nil,
 		runSeq = 0,
 		previous = nil,
@@ -796,7 +801,23 @@ local function onList(s: State, msg: any)
 	s.result = result
 end
 
-local function onInfo(s: State, msg: any)
+-- Without a cache: run against non-production targets, hold the rest.
+local function autoRun(s: State, effects: { Effect })
+	local t = s.target
+	if t and t.source == "unknown" and s.infoLoading then
+		s.autoPending = true
+		return
+	end
+	s.autoPending = false
+	if t == nil or t.production then
+		s.held = true
+		s.heldFor = "target"
+	else
+		startRun(s, true, effects)
+	end
+end
+
+local function onInfo(s: State, msg: any, effects: { Effect })
 	if msg.gen ~= s.gen then
 		return
 	end
@@ -815,6 +836,9 @@ local function onInfo(s: State, msg: any)
 		s.cache = Resolve.store(s.cache, Resolve.fromError(authId, why or ("exit " .. msg.status), msg.now))
 	end
 	resolveTarget(s)
+	if s.autoPending and s.result == nil and not s.held then
+		autoRun(s, effects)
+	end
 end
 
 local function onAuths(s: State, msg: any)
@@ -838,7 +862,7 @@ end
 
 local function onRan(s: State, msg: any, effects: { Effect })
 	if msg.step == "info" then
-		onInfo(s, msg)
+		onInfo(s, msg, effects)
 		return
 	elseif msg.step == "auths" then
 		onAuths(s, msg)
@@ -911,6 +935,7 @@ local function retarget(s: State, effects: { Effect })
 	s.previous = nil
 	s.cached = false
 	s.loaded = false
+	s.autoPending = false
 	s.run = nil
 	s.selected = 1
 	s.infoLoading = false
@@ -964,7 +989,7 @@ local function onLoaded(s: State, msg: any, effects: { Effect })
 		s.cached = true
 		clamp(s)
 	elseif not s.held then
-		startRun(s, true, effects)
+		autoRun(s, effects)
 	end
 end
 

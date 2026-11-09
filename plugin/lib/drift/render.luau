@@ -325,16 +325,14 @@ end
 
 local function heldNodes(s: State): { Node }
 	local why = if s.heldFor == "target"
-		then "A production account is picked: nothing has run against it yet (drift only reads it)."
+		then "The account is production or could not be classified: nothing has run against it yet (drift only reads it)."
 		else "Opened from a link: nothing has run yet."
 	return {
 		ui.text({ ui.span(why, "warning strong") }, { key = "held" }),
 		ui.text({
 			ui.span("Press Enter", "strong"),
 			ui.span(
-				" to import the account's copies of this project's objects and files into a scratch project with the SuiteCloud CLI (it loads "
-					.. (s.root or "?")
-					.. "/suitecloud.config.js) and compare them, or q to close.",
+				" to import the account's copies of this project's objects and files into a scratch project with the SuiteCloud CLI (with a generated suitecloud.config.js: the project's hooks do not run) and compare them, or q to close.",
 				"muted"
 			),
 		}, { key = "held-how" }),

@@ -80,6 +80,20 @@ describe("drift scratch", function()
 		local _, why = Scratch.plan({ ["suitecloud.config.js"] = "x" }, "src", "demo-sb")
 		expect(why).toContain("manifest.xml")
 	end)
+
+	it("writes a generated config naming only the project folder, never the project's own", function()
+		local plan = Scratch.plan({
+			["suitecloud.config.js"] = "module.exports = { defaultProjectFolder: 'src', commands: { 'object:import': { beforeExecuting: () => {} } } };",
+			["src/manifest.xml"] = "<m/>",
+		}, "src", "demo-sb") :: Scratch.Plan
+		expect(plan.writes[1].path).toBe("suitecloud.config.js")
+		expect(plan.writes[1].text).toBe('module.exports = {\n\tdefaultProjectFolder: "src",\n};\n')
+	end)
+
+	it("refuses a project folder the generated config cannot quote", function()
+		local _, why = Scratch.plan({ ['a"b/manifest.xml'] = "<m/>" }, 'a"b', "demo-sb")
+		expect(why).toContain("not a relative folder name")
+	end)
 end)
 
 describe("drift cache", function()

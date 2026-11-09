@@ -104,8 +104,9 @@ describe("drift state", function()
 			paths[w.path] = w.text
 		end
 		expect(paths["project.json"]).toContain('"defaultAuthId": "demo-sb"')
-		expect(paths["suitecloud.config.js"]).toBe(sample.CONFIG_JS)
+		expect(paths["suitecloud.config.js"]).toBe('module.exports = {\n\tdefaultProjectFolder: "src",\n};\n')
 		expect(paths["src/manifest.xml"] ~= nil).toBe(true)
+		expect(paths["src/deploy.xml"]).toBeNil()
 		s, effects = prepared(s, effects)
 		local imp = find(effects, "run", "objects") :: Effect
 		expect(imp.cwd).toBe(sample.DIR)
@@ -177,6 +178,70 @@ describe("drift state", function()
 		s, effects = step(s, { t = "scanned", gen = s.gen, project = project, texts = texts })
 		expect(find(effects, "prepare") ~= nil).toBe(true)
 		expect(s.held).toBe(false)
+	end)
+
+	-- Opens on a project whose project.json names `authId`, up to the cache miss.
+	local function openAs(authId: string): (S, { Effect }, Effect?)
+		local s = State.init({ cwd = sample.ROOT })
+		s = step(s, { t = "config", config = sample.CFG, now = 1000, clock = 1700000000 })
+		s = step(s, { t = "found", gen = s.gen, root = sample.ROOT })
+		local project, texts = sample.project({ authId = authId })
+		local effects
+		s, effects = step(s, { t = "scanned", gen = s.gen, project = project, texts = texts })
+		local info = find(effects, "run", "info")
+		local load = find(effects, "load") :: Effect
+		s, effects = step(s, { t = "loaded", gen = s.gen, file = load.file, value = nil })
+		return s, effects, info
+	end
+
+	it("waits for Enter without a cache when the project's account is production", function()
+		local s, effects = openAs("demo-prod")
+		expect(find(effects, "prepare")).toBeNil()
+		expect(s.held).toBe(true)
+		expect(s.heldFor).toBe("target")
+		s, effects = step(s, { t = "key", name = "enter" })
+		local project, texts = sample.project({ authId = "demo-prod" })
+		s, effects = step(s, { t = "scanned", gen = s.gen, project = project, texts = texts })
+		expect(find(effects, "prepare") ~= nil).toBe(true)
+	end)
+
+	it("classifies an unknown auth ID with --info before running without a cache", function()
+		local s, effects, info = openAs("acme-new")
+		expect(info ~= nil).toBe(true)
+		expect(find(effects, "prepare")).toBeNil()
+		expect(s.held).toBe(false)
+		local e = info :: Effect
+		local stdout = string.gsub(fixtures.read("suitecloud/manageauth/info-sandbox.txt"), "demo%-sb", "acme-new")
+		s, effects = step(s, {
+			t = "ran",
+			gen = e.gen,
+			step = "info",
+			argv = e.argv,
+			status = 0,
+			stdout = stdout,
+			stderr = "",
+			timedOut = false,
+			now = 1001,
+		})
+		expect(find(effects, "prepare") ~= nil).toBe(true)
+	end)
+
+	it("waits for Enter when --info cannot classify the auth ID", function()
+		local s, effects, info = openAs("demo-missing")
+		local e = info :: Effect
+		s, effects = step(s, {
+			t = "ran",
+			gen = e.gen,
+			step = "info",
+			argv = e.argv,
+			status = 1,
+			stdout = fixtures.read("suitecloud/manageauth/info-missing.txt"),
+			stderr = "",
+			timedOut = false,
+			now = 1001,
+		})
+		expect(find(effects, "prepare")).toBeNil()
+		expect(s.held).toBe(true)
 	end)
 
 	it(

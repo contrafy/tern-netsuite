@@ -209,6 +209,52 @@ describe("toast on a new problem", function()
 		end
 		expect(toasts).toBe(2)
 	end)
+
+	it("toasts when a connection with a broken check starts reporting errors", function()
+		expect(Model.shouldToast("failed", "error")).toBe(true)
+		local seq = { "ok", "failed", "error" }
+		local toasts = 0
+		local prev: Model.ConnState? = nil
+		for _, s in seq do
+			if Model.shouldToast(prev, s :: Model.ConnState) then
+				toasts += 1
+			end
+			prev = s :: Model.ConnState
+		end
+		expect(toasts).toBe(2)
+	end)
+end)
+
+describe("publishing a summary", function()
+	it("does not replace a complete summary with one whose checks have not run yet (takeover)", function()
+		local before = conn()
+		allOk(before, NOW)
+		Model.record(before, spec("errors"), Checks.evaluate(spec("errors"), ERRORS_BAD, nil, NOW, nil))
+		local published = Model.summary(before, SPECS, NOW, 300)
+		expect(published.state).toBe("error")
+		-- A window that took over polling has answered one check so far.
+		local c = conn()
+		Model.record(c, spec("orders"), Checks.evaluate(spec("orders"), { { n = "1" } }, nil, NOW + 5, nil))
+		expect(Model.publishable(c, SPECS, published)).toBe(false)
+		allOk(c, NOW + 10)
+		expect(Model.publishable(c, SPECS, published)).toBe(true)
+	end)
+
+	it("publishes partial rounds when nothing better was published", function()
+		local c = conn()
+		Model.record(c, spec("orders"), Checks.evaluate(spec("orders"), { { n = "1" } }, nil, NOW, nil))
+		expect(Model.publishable(c, SPECS, nil)).toBe(true)
+		local pending = Model.summary(conn(), SPECS, NOW, 300)
+		expect(Model.publishable(c, SPECS, pending)).toBe(true)
+	end)
+
+	it("always publishes missing credentials", function()
+		local before = conn()
+		allOk(before, NOW)
+		local c = conn()
+		Model.disconnect(c, "no credentials")
+		expect(Model.publishable(c, SPECS, Model.summary(before, SPECS, NOW, 300))).toBe(true)
+	end)
 end)
 
 return nil

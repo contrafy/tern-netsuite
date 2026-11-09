@@ -104,6 +104,12 @@ function M.first(scope: Scope, n: number): Clause
 	return build(scope, {}, {}, DESC, n)
 end
 
+-- The oldest `n` rows of the scope: after a first load found none, every
+-- row is new, and reading them oldest first lets a full page continue.
+function M.earliest(scope: Scope, n: number): Clause
+	return build(scope, {}, {}, ASC, n)
+end
+
 -- A poll: up to `n` rows logged at or after `from`, oldest first.
 function M.poll(scope: Scope, from: string, n: number): Clause
 	return build(scope, { "n.date >= TO_DATE(?, " .. FORMAT .. ")" }, { from }, ASC, n)

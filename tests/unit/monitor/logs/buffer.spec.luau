@@ -77,12 +77,24 @@ describe("the log ring buffer", function()
 		expect(ids(again)).toEqual({ 3, 4, 5 })
 	end)
 
-	it("forgets dedupe ids older than the next poll window to stay bounded", function()
-		local b = Buffer.merge(Buffer.new(100), { fake(1, "2026-10-08 22:00:01"), fake(2, "2026-10-08 22:05:00") })
+	it("forgets dedupe ids of dropped rows older than the next poll window to stay bounded", function()
+		local b = Buffer.merge(Buffer.new(2), {
+			fake(1, "2026-10-08 22:00:01"),
+			fake(2, "2026-10-08 22:00:02"),
+			fake(3, "2026-10-08 22:05:00"),
+		})
 		local pruned = Buffer.prune(b, "2026-10-08 22:03:00")
 		expect(pruned.seen[1]).toBeNil()
-		expect(pruned.seen[2]).toBe("2026-10-08 22:05:00")
+		expect(pruned.seen[3]).toBe("2026-10-08 22:05:00")
 		expect(#pruned.entries).toBe(2)
+	end)
+
+	it("never adds a held row twice, even when a poll returns it after its window passed", function()
+		local b = Buffer.merge(Buffer.new(100), { fake(1, "2026-10-08 22:00:01"), fake(2, "2026-10-08 22:05:00") })
+		local pruned = Buffer.prune(b, "2026-10-08 22:03:00")
+		local again, added = Buffer.merge(pruned, { fake(1, "2026-10-08 22:00:01") })
+		expect(added).toBe(0)
+		expect(ids(again)).toEqual({ 1, 2 })
 	end)
 
 	it("never mutates the buffer it was given", function()

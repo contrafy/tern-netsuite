@@ -1,8 +1,11 @@
 --!strict
 -- Window half of the execution log tail: the palette command and the `logs`
 -- link area. `tern-netsuite://logs?...` opens the `logs` block with validated
--- arguments; `tern-netsuite://logs/connect?connection=<id>` opens the connect
--- block (the logs block links there when credentials are missing). The URL
+-- arguments, held until the user presses Enter (any program can print such
+-- a link); `tern-netsuite://logs/start?grant=<id>` (the lens chip) takes a
+-- single-use grant and opens a tail that starts at once;
+-- `tern-netsuite://logs/connect?connection=<id>` opens the connect block
+-- (the logs block links there when credentials are missing). The URL
 -- format is documented in lib/monitor/logs/link.luau.
 
 local lazy = require("./lib/lazy")
@@ -19,7 +22,17 @@ function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
 		cx:toast("error", "Tern NetSuite: invalid logs link", err)
 		return { handled = true }
 	end
-	return { block = decision.block, args = decision.args }
+	local args = Link().blockArgs(decision)
+	if decision.grant then
+		local granted, rest, why = Link().takeStart(tern.kv.get(Link().GRANTS_KEY), decision.grant, os.time())
+		tern.kv.set(Link().GRANTS_KEY, rest)
+		if granted == nil then
+			cx:toast("error", "Tern NetSuite: logs not started", why)
+			return { handled = true }
+		end
+		args = granted
+	end
+	return { block = decision.block, args = args }
 end
 
 function M.register()

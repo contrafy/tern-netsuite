@@ -12,12 +12,21 @@
 --                 zone) or a relative `<n>m`, `<n>h`, `<n>d` (at most 30 days)
 --   tern-netsuite://logs/connect?connection=<id>
 --     opens the connect block for that connection
+--   tern-netsuite://logs/start?grant=<id>
+--     opens the tail a single-use grant (lib/monitor/grant.luau) describes
+--     and starts it; the lens "Tail logs" chip stores the grant
+--
+-- A plain logs link is read-only and parameterised, but any program can
+-- print one: its block starts held (block arg `hold=1`), shows its scope and
+-- queries nothing until the user presses Enter. The palette command and a
+-- granted start link start at once.
 --
 -- Everything is validated here, strictly: unknown parameters, fragments,
 -- other paths, repeated single values and malformed escapes are refused.
 -- Values only ever reach SuiteQL as `?` parameters (query.luau).
 
 local Encoding = require("../../ns/encoding")
+local Grant = require("../grant")
 local Query = require("./query")
 
 local M = {}
@@ -29,14 +38,21 @@ M.CONNECT_BLOCK = "tern-netsuite.connect"
 M.MAX_URL = 2048
 M.MAX_SCRIPTS = 50
 M.MAX_SINCE_MINUTES = 30 * 1440
+M.GRANTS_KEY = "logs.grants"
+M.HOLD_ARG = "hold=1"
 
 export type Launch = {
 	connection: string?,
 	scripts: { string },
 	since: Query.Since?,
+	-- Wait for Enter before the first query (opened from a plain link).
+	hold: boolean?,
 }
 
-export type Decision = { block: string, args: { string } }
+-- `hold`: the block must wait for Enter (a plain tail link; `blockArgs`
+-- adds the arg). `grant` is set for a start link: the window takes the
+-- grant and opens the block with the args stored in it instead of `args`.
+export type Decision = { block: string, args: { string }, hold: boolean?, grant: string? }
 
 local function quote(v: string): string
 	local short = if #v > 60 then string.sub(v, 1, 57) .. "..." else v
@@ -187,23 +203,37 @@ function M.toArgs(launch: Launch): { string }
 	if launch.since then
 		table.insert(out, "since=" .. sinceText(launch.since))
 	end
+	if launch.hold then
+		table.insert(out, M.HOLD_ARG)
+	end
 	return out
 end
 
 -- The launch the block args describe; invalid args are left out and named
--- in `problems`.
+-- in `problems`. `hold=1` is a block arg only: links cannot pass it.
 function M.fromArgs(args: { string }): (Launch, { string })
-	local launch: Launch = { connection = nil, scripts = {}, since = nil }
+	local launch: Launch = { connection = nil, scripts = {}, since = nil, hold = nil }
 	local problems: { string } = {}
 	local seen: Seen = {}
 	for _, a in args do
 		local key, value = string.match(a, "^([^=]*)=(.*)$")
-		local problem = if key and value then apply(launch, key, value, seen) else "unknown argument " .. quote(a)
+		local problem: string?
+		if a == M.HOLD_ARG then
+			launch.hold = true
+		elseif key and value then
+			problem = apply(launch, key, value, seen)
+		else
+			problem = "unknown argument " .. quote(a)
+		end
 		if problem then
 			table.insert(problems, problem)
 		end
 	end
 	return launch, problems
+end
+
+function M.startUrl(id: string): string
+	return M.SCHEME .. M.AREA .. "/start?grant=" .. id
 end
 
 -- The decision for a `tern-netsuite://logs...` URL, or nil and why.
@@ -219,11 +249,18 @@ function M.route(url: string): (Decision?, string?)
 		return nil, "a logs link takes no fragment"
 	end
 	local path, query = string.match(rest, "^([^?]*)%??(.*)$")
+	if path == "/start" then
+		local id = string.match(query or "", "^grant=([a-f0-9]+)$")
+		if id == nil or not Grant.validId(id) then
+			return nil, "a start link takes only grant=<id>"
+		end
+		return { block = M.BLOCK, args = {}, grant = id }, nil
+	end
 	local connect = path == "/connect"
 	if not (connect or path == "" or path == "/") then
 		return nil, "unknown logs link path " .. quote(path or "")
 	end
-	local launch: Launch = { connection = nil, scripts = {}, since = nil }
+	local launch: Launch = { connection = nil, scripts = {}, since = nil, hold = nil }
 	local seen: Seen = {}
 	for pair in string.gmatch(query or "", "[^&]+") do
 		local rawKey, rawValue = string.match(pair, "^([^=]*)=?(.*)$")
@@ -249,13 +286,23 @@ function M.route(url: string): (Decision?, string?)
 		end
 		return { block = M.CONNECT_BLOCK, args = { launch.connection :: string } }, nil
 	end
-	return { block = M.BLOCK, args = M.toArgs(launch) }, nil
+	return { block = M.BLOCK, args = M.toArgs(launch), hold = true }, nil
 end
 
--- The link that opens the tail for `launch`.
+-- The block args to open a plain-link decision with.
+function M.blockArgs(d: Decision): { string }
+	local args = table.clone(d.args)
+	if d.hold then
+		table.insert(args, M.HOLD_ARG)
+	end
+	return args
+end
+
+-- The link that opens the tail for `launch` (held until Enter when clicked
+-- outside the plugin; `grantStart` turns it into a start link).
 function M.url(launch: Launch): string
 	local kv: { { string } } = {}
-	for _, a in M.toArgs(launch) do
+	for _, a in M.toArgs({ connection = launch.connection, scripts = launch.scripts, since = launch.since }) do
 		local k, v = string.match(a, "^([^=]*)=(.*)$")
 		table.insert(kv, { k :: string, v :: string })
 	end
@@ -263,9 +310,52 @@ function M.url(launch: Launch): string
 	return M.SCHEME .. M.AREA .. (if q == "" then "" else "?" .. q)
 end
 
+-- For the plugin's own UI (the lens chip): stores a grant to start the tail
+-- `url` describes under id `id`. Returns the start link to open and the
+-- grants to store, or nil and why when `url` is not a tail link.
+function M.grantStart(url: string, stored: any, id: string, now: number): (string?, Grant.Grants?, string?)
+	local d, err = M.route(url)
+	if d == nil or d.block ~= M.BLOCK or d.grant ~= nil then
+		return nil, nil, err or "not a tail link"
+	end
+	return M.startUrl(id), Grant.add(stored, id, d.args, now), nil
+end
+
+-- Takes start grant `id`: the block args to start with (validated again),
+-- the remaining grants (store them back) and otherwise why not.
+function M.takeStart(stored: any, id: string, now: number): ({ string }?, Grant.Grants, string?)
+	local data, rest, why = Grant.take(stored, id, now)
+	if data == nil then
+		return nil,
+			rest,
+			if why == "expired"
+				then "this Tail logs link expired; click the chip again"
+				else "this Tail logs link was already used or unknown; click the chip again"
+	end
+	local args: { string } = {}
+	if type(data) ~= "table" then
+		return nil, rest, "the stored tail request is malformed"
+	end
+	for _, a in data do
+		if type(a) ~= "string" or a == M.HOLD_ARG then
+			return nil, rest, "the stored tail request is malformed"
+		end
+		table.insert(args, a)
+	end
+	local _, problems = M.fromArgs(args)
+	if #problems > 0 then
+		return nil, rest, "the stored tail request is malformed"
+	end
+	return args, rest, nil
+end
+
 -- The link that opens the connect block for `connection`.
 function M.connectUrl(connection: string): string
 	return M.SCHEME .. M.AREA .. "/connect?connection=" .. Encoding.percent(connection)
+end
+
+function M.newId(seed: string, counter: number): string
+	return Grant.newId("logs", seed, counter)
 end
 
 return M

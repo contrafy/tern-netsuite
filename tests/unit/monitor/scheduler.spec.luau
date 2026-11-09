@@ -195,6 +195,33 @@ describe("polling lease across windows", function()
 		local taken = Scheduler.lease({ owner = 5 } :: any, "w1", 100, 60)
 		expect(taken ~= nil and taken.owner).toBe("w1")
 	end)
+
+	it("keeps its role when the lease cannot be read instead of treating it as free", function()
+		local held = Scheduler.lease(nil, "w1", 100, 60)
+		local action, write = Scheduler.leaseStep(false, held, "w2", 120, 60)
+		expect(action).toBe("wait")
+		expect(write).toBeNil()
+	end)
+
+	it("confirms a new claim by reading it back, so two windows claiming at once do not both poll", function()
+		local action, write = Scheduler.leaseStep(true, nil, "w1", 100, 60)
+		expect(action).toBe("claim")
+		expect((write :: Scheduler.Lease).owner).toBe("w1")
+		-- w2 wrote its claim after ours: we follow.
+		expect(Scheduler.holds(Scheduler.lease(nil, "w2", 100, 60), "w1")).toBe(false)
+		expect(Scheduler.holds(write, "w1")).toBe(true)
+		expect(Scheduler.holds({ owner = 5 } :: any, "w1")).toBe(false)
+	end)
+
+	it("follows a live holder, renews its own lease when due and otherwise just polls", function()
+		local w1 = Scheduler.lease(nil, "w1", 100, 60)
+		expect((Scheduler.leaseStep(true, w1, "w2", 110, 60))).toBe("follow")
+		expect((Scheduler.leaseStep(true, w1, "w1", 110, 60))).toBe("poll")
+		local action, write = Scheduler.leaseStep(true, w1, "w1", 135, 60)
+		expect(action).toBe("renew")
+		expect((write :: Scheduler.Lease).expires).toBe(195)
+		expect((Scheduler.leaseStep(true, w1, "w2", 110, 60, true))).toBe("claim")
+	end)
 end)
 
 return nil

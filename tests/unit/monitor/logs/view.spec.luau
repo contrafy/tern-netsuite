@@ -193,6 +193,50 @@ describe("the execution log view", function()
 		expect(#list.c).toBe(100)
 	end)
 
+	it("keeps the row list within the 200 children Tern renders without virtualizing", function()
+		local many = {}
+		for i = 1, 600 do
+			table.insert(many, {
+				internalid = 6000000 + i,
+				logged = string.format("2026-10-09 00:%02d:%02d", i // 60, i % 60),
+				type = "DEBUG",
+				title = "bulk",
+				detail = "",
+			})
+		end
+		local reloaded, effects = State.update(loaded(), { t = "key", key = key("r") })
+		local req = 0
+		for _, e in effects do
+			if e.t == "query" then
+				req = e.req :: number
+			end
+		end
+		local s = State.update(reloaded, { t = "result", req = req, rows = many, at = "x" })
+		local list: any = nil
+		for _, n in (View.view(s).main :: any).c do
+			if n.p and n.p.key == "rows" then
+				list = n
+			end
+		end
+		expect(#list.c <= 200).toBe(true)
+	end)
+
+	it("shows what a link-opened tail would read and that Enter starts it", function()
+		local s = State.init(
+			{ "connection=prod-rest", "script=customscript_a", "since=30m", "hold=1" },
+			nil,
+			config(true),
+			env
+		)
+		local v = text(View.view(s))
+		expect(v).toContain("prod-rest")
+		expect(v).toContain("PROD")
+		expect(v).toContain("customscript_a")
+		expect(v).toContain("30 minutes ago")
+		expect(v).toContain("Enter starts")
+		expect(View.title(s)).toContain("Enter")
+	end)
+
 	it("keeps every row on one line of a narrow block so the visible window stays accurate", function()
 		for _, cols in { 60, 100, 200 } do
 			local s = State.update(loaded(), { t = "resize", height = 40, width = cols })

@@ -17,6 +17,9 @@ local Model = lazy(function()
 	return require("./lib/monitor/health/model")
 end)
 local NsWindow = require("./ns_window")
+local Refresh = lazy(function()
+	return require("./lib/monitor/health/refresh")
+end)
 local Scheduler = require("./lib/monitor/scheduler")
 local StatusWindow = require("./status_window")
 
@@ -57,9 +60,10 @@ local disconnectedAt: { [string]: number } = {}
 local lastState: { [string]: ConnState } = {}
 local latest: { [string]: Summary } = {}
 local badgeSig = ""
-local lastCx: WindowCx? = nil
 local timer: TimerHandle? = nil
 local polling = false
+-- os.time() of the last refresh link that polled.
+local lastRefresh: number? = nil
 
 local function guarded(what: string, fn: () -> ())
 	local ok, err = pcall(function()
@@ -139,15 +143,28 @@ local function sync()
 	updateBadges()
 end
 
+-- Query callbacks carry no WindowCx and a stored one is only valid during
+-- its call, so a toast gets a fresh cx from a timer.
+local function toast(text: string, sub: string)
+	tern.timer(0, function(cx: WindowCx?)
+		if cx then
+			cx:toast("error", text, sub)
+		end
+	end)
+end
+
 local function publish(c: Conn, now: number)
 	local s = Model().summary(c, specs, now, (config :: Config.Config).monitor.poll_seconds)
+	if not Model().publishable(c, specs, latest[c.id]) then
+		-- Right after a takeover: keep what the previous poller published
+		-- until every check of this connection has run here.
+		return
+	end
 	pcall(tern.kv.set, M.summaryKey(c.id), s)
 	latest[c.id] = s
-	if Model().shouldToast(lastState[c.id], s.state) and lastCx then
-		local cx = lastCx :: WindowCx
-		pcall(function()
-			cx:toast(
-				"error",
+	if Model().shouldToast(lastState[c.id], s.state) then
+		guarded("toast", function()
+			toast(
 				"NetSuite health: " .. c.label .. " " .. (if s.state == "error" then "has errors" else "check failed"),
 				s.badge or "Open Tern NetSuite: Account health for details"
 			)
@@ -234,16 +251,27 @@ local function tick(force: boolean?)
 	end
 	local now = os.time()
 	local okGet, current = pcall(tern.kv.get, M.LEASE_KEY)
-	local held: Scheduler.Lease? = if okGet then current else nil
-	local lease = Scheduler.lease(held, me, now, M.LEASE_SECONDS, force)
-	if lease == nil then
+	local action, lease = Scheduler.leaseStep(okGet, if okGet then current else nil, me, now, M.LEASE_SECONDS, force)
+	if action == "wait" then
+		schedule(M.TICK_MS)
+		return
+	end
+	if lease then
+		pcall(tern.kv.set, M.LEASE_KEY, lease)
+	end
+	if action == "claim" then
+		-- Another window may have claimed at the same moment: poll only if
+		-- our claim is the one stored.
+		local okBack, back = pcall(tern.kv.get, M.LEASE_KEY)
+		if not (okBack and Scheduler.holds(back, me)) then
+			action = "follow"
+		end
+	end
+	if action == "follow" then
 		polling = false
 		follow()
 		schedule(M.TICK_MS)
 		return
-	end
-	if held == nil or (held :: any).owner ~= me or Scheduler.needsRenewal(held :: Scheduler.Lease, now) then
-		pcall(tern.kv.set, M.LEASE_KEY, lease)
 	end
 	if not polling then
 		-- Taking over: adopt what the previous poller published.
@@ -263,37 +291,53 @@ function schedule(ms: number)
 			(timer :: TimerHandle):cancel()
 		end)
 	end
-	timer = tern.timer(ms, function(cx: WindowCx?)
+	timer = tern.timer(ms, function()
 		timer = nil
-		if cx then
-			lastCx = cx
-		end
 		guarded("tick", function()
 			tick()
 		end)
 	end)
 end
 
+-- Takes refresh grant `id`; false when it is unknown, used or expired.
+local function takeGrant(id: string): boolean
+	local ok, granted = pcall(function(): boolean
+		local live, rest = Refresh().take(tern.kv.get(Refresh().GRANTS_KEY), id, os.time())
+		tern.kv.set(Refresh().GRANTS_KEY, rest)
+		return live
+	end)
+	return ok and granted == true
+end
+
 -- Handles `tern-netsuite://health/<action>`; window.luau dispatches area
--- "health" here. `refresh` reloads the config and polls everything now.
+-- "health" here. `refresh?grant=<id>` (the health block's r) reloads the
+-- config and polls everything now, at most every Refresh.MIN_SECONDS.
+-- Connections paused after an authentication failure stay paused: only the
+-- connect flow (reconnect) or a config change (sync) resumes them.
 function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
-	local action = string.match(link.url, "^tern%-netsuite://health/([%w_%-]+)")
-	if action ~= "refresh" then
+	local action, id = Refresh().parse(link.url)
+	if action == nil then
 		cx:toast("error", "Tern NetSuite: unknown health link", link.url)
 		return { handled = true }
 	end
-	lastCx = cx
+	if id == nil or not takeGrant(id) then
+		-- Printed by something other than the health block: ignore quietly.
+		log.debug("tern-netsuite health: ignored a refresh link without a valid grant")
+		return { handled = true }
+	end
+	local now = os.time()
+	if not Refresh().allowed(lastRefresh, now) then
+		cx:toast(
+			"info",
+			"Tern NetSuite: health was refreshed moments ago",
+			string.format("Refreshes are at least %d s apart; polling continues on schedule.", Refresh().MIN_SECONDS)
+		)
+		return { handled = true }
+	end
+	lastRefresh = now
 	ConfigHost.load()
 	sync()
-	for id in disconnectedAt do
-		local c = conns[id]
-		if c then
-			Model().reconnect(c)
-		end
-		Scheduler.resume(sched, id)
-	end
-	disconnectedAt = {}
-	Scheduler.runNow(sched, os.time())
+	Scheduler.runNow(sched, now)
 	tick(true)
 	return { handled = true }
 end
@@ -302,14 +346,12 @@ function M.register()
 	-- After `tern plugin reload` window_start does not fire again and a
 	-- timer armed during load never fired (Tern 0.6.3), so the first focus
 	-- event also starts the chain.
-	tern.on("focus", function(_ev: FocusEvent, cx: WindowCx)
-		lastCx = cx
+	tern.on("focus", function(_ev: FocusEvent, _cx: WindowCx)
 		if timer == nil then
 			schedule(0)
 		end
 	end)
-	tern.on("window_start", function(cx: WindowCx)
-		lastCx = cx
+	tern.on("window_start", function(_cx: WindowCx)
 		if timer == nil then
 			schedule(0)
 		end

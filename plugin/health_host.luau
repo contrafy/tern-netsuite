@@ -2,10 +2,12 @@
 -- Host glue for the `health` block. NetSuite is never queried here: the
 -- window's poller (health_window.luau) stores one summary per connection
 -- in tern.kv, and this block re-reads them on a timer. `r` asks the window
--- to poll now through a tern-netsuite://health/refresh link.
+-- to poll now: it stores a single-use grant and opens
+-- tern-netsuite://health/refresh?grant=<id> (lib/monitor/health/refresh.luau).
 
 local ConfigHost = require("./config_host")
 local Model = require("./lib/monitor/health/model")
+local Refresh = require("./lib/monitor/health/refresh")
 local View = require("./lib/monitor/health/view")
 
 local log = tern.log
@@ -13,7 +15,9 @@ local log = tern.log
 local M = {}
 
 M.TICK_MS = 2000
-M.REFRESH_LINK = "tern-netsuite://health/refresh"
+
+local seed = string.format("health:%d:%.6f:%.17g:%s", os.time(), os.clock(), math.random(), tostring({}))
+local counter = 0
 
 type Host = {
 	cx: BlockCx,
@@ -140,7 +144,15 @@ function M.register()
 			elseif key.name == "r" then
 				pcall(loadConnections, h)
 				pcall(read, h)
-				cx:open(M.REFRESH_LINK)
+				counter += 1
+				local id = Refresh.newId(seed, counter)
+				local ok, err = pcall(function()
+					tern.kv.set(Refresh.GRANTS_KEY, Refresh.add(tern.kv.get(Refresh.GRANTS_KEY), id, os.time()))
+					cx:open(Refresh.url(id))
+				end)
+				if not ok then
+					warnOnce(h, "refresh", err)
+				end
 				return true
 			end
 			return false

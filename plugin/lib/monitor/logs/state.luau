@@ -92,6 +92,11 @@ export type State = {
 	-- Set once rows arrived: later queries poll from `from`.
 	loaded: boolean,
 	from: string?,
+	-- The first load found no rows: load ascending from the start of the
+	-- scope so a burst is read in full, not only its newest FIRST_ROWS.
+	ascend: boolean,
+	-- Opened from a plain link: nothing is queried until Enter.
+	held: boolean,
 	failures: number,
 	err: NsError?,
 	-- A non-retryable error stopped the chain; r restarts it.
@@ -122,8 +127,9 @@ M.DOCK_LINES = 8
 M.MIN_VIEWPORT = 12
 -- Rows drawn at most, around the selection, in a list that fills the pane
 -- and keeps the selection in view (ui.scroll). Never sized from the height:
--- Tern 0.7.0 reports 80x24 for a block that never resized.
-M.MAX_RENDER_ROWS = 300
+-- Tern 0.7.0 reports 80x24 for a block that never resized. Tern virtualizes
+-- lists of more than 200 children, which only render `item` nodes.
+M.MAX_RENDER_ROWS = 200
 M.SCROLLOFF = 2
 
 -- Accessors ---------------------------------------------------------------------
@@ -183,6 +189,10 @@ function M.paused(s: State): boolean
 	return s.paused
 end
 
+function M.held(s: State): boolean
+	return s.held
+end
+
 function M.filterText(s: State): string
 	return s.filterText
 end
@@ -216,10 +226,10 @@ function M.window(selected: number, total: number, offset: number, size: number)
 end
 
 -- Exponential backoff for retryable errors, starting at the poll interval
--- (twice it for rate limits).
+-- (twice it for rate limits) and never below it.
 function M.backoff(failures: number, kind: string, pollMs: number): number
 	local base = if kind == "rate_limit" then pollMs * 2 else pollMs
-	return math.min(base * 2 ^ math.max(failures - 1, 0), M.MAX_BACKOFF_MS)
+	return math.max(pollMs, math.min(base * 2 ^ math.max(failures - 1, 0), M.MAX_BACKOFF_MS))
 end
 
 -- Chain -------------------------------------------------------------------------
@@ -236,6 +246,9 @@ local function startQuery(s: State, effects: { Effect })
 	if s.loaded and s.from then
 		clause = Query.poll(s.scope, s.from, M.POLL_ROWS)
 		s.pending = { kind = "poll", max = M.POLL_ROWS, ascending = true }
+	elseif s.ascend and s.scope.since == nil then
+		clause = Query.earliest(s.scope, M.POLL_ROWS)
+		s.pending = { kind = "first", max = M.POLL_ROWS, ascending = true }
 	else
 		clause = Query.first(s.scope, M.FIRST_ROWS)
 		s.pending = { kind = "first", max = M.FIRST_ROWS, ascending = s.scope.since ~= nil }
@@ -265,6 +278,7 @@ local function reset(s: State, effects: { Effect })
 	s.buffer = Buffer.new(M.CAP)
 	s.loaded = false
 	s.from = nil
+	s.ascend = false
 	s.failures = 0
 	s.err = nil
 	s.stopped = false
@@ -306,7 +320,7 @@ local function onResult(s: State, msg: Msg, effects: { Effect }): boolean
 			table.insert(list, e)
 		end
 	end
-	local buffer, added = Buffer.merge(s.buffer, list)
+	local buffer = Buffer.merge(s.buffer, list)
 	s.failures = 0
 	s.err = nil
 	s.retryMs = nil
@@ -314,21 +328,38 @@ local function onResult(s: State, msg: Msg, effects: { Effect }): boolean
 	local wm = buffer.watermark
 	if wm == nil then
 		s.buffer = buffer
+		s.ascend = true
 		schedule(s, effects, s.pollMs)
 		return true
 	end
 	s.loaded = true
 	local more = pending.ascending and (msg.truncated == true or #rows >= pending.max)
 	local from: string
-	if more and added == 0 then
-		-- A full page of rows logged in the same second, all seen already.
-		from = Query.shift(wm, 1) or wm
-		s.notice = string.format("More than %d rows were logged at %s; some were skipped.", pending.max, wm)
+	if more then
+		-- Continue from the page's newest row: rows between it and the
+		-- watermark may lie past the page cut.
+		local top: string? = nil
+		for _, e in list do
+			if top == nil or e.logged > top then
+				top = e.logged
+			end
+		end
+		local newest: string = top or wm
+		if s.from ~= nil and newest <= s.from then
+			-- A full page of rows logged in the second the poll started from.
+			from = Query.shift(newest, 1) or newest
+			s.notice = string.format("More than %d rows were logged at %s; some were skipped.", pending.max, newest)
+		else
+			from = newest
+		end
 	else
-		from = if more then wm else Query.nextFrom(wm, false)
+		from = Query.nextFrom(wm, false)
 	end
 	s.from = from
-	s.buffer = Buffer.prune(buffer, from)
+	-- Later polls start at `from` or, once a burst ends, at the overlap
+	-- window before the watermark: keep dedupe ids from the earlier one.
+	local overlap = Query.nextFrom(wm, false)
+	s.buffer = Buffer.prune(buffer, if overlap < from then overlap else from)
 	schedule(s, effects, if more then 0 else s.pollMs)
 	return true
 end
@@ -443,7 +474,33 @@ local function editKey(s: State, key: Key): boolean
 	return true
 end
 
+-- Ends the wait of a block opened from a plain link.
+local function start(s: State, effects: { Effect })
+	s.held = false
+	if not s.stopped then
+		startQuery(s, effects)
+	end
+	table.insert(effects, { t = "save" })
+end
+
+-- A held block only starts (Enter) or closes: nothing else may query.
+local function heldKey(s: State, key: Key, effects: { Effect }): boolean
+	if key.ctrl or key.meta or key.alt then
+		return false
+	elseif key.name == "escape" then
+		table.insert(effects, { t = "exit" })
+		return false
+	elseif key.name == "enter" or key.name == "return" then
+		start(s, effects)
+		return true
+	end
+	return false
+end
+
 local function onKey(s: State, key: Key, effects: { Effect }): boolean
+	if s.held then
+		return heldKey(s, key, effects)
+	end
 	if s.editing then
 		return editKey(s, key)
 	end
@@ -487,6 +544,15 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 end
 
 local function onAction(s: State, act: string, value: string, effects: { Effect }): boolean
+	if s.held then
+		if act == "start" then
+			start(s, effects)
+			return true
+		elseif act == "close" then
+			table.insert(effects, { t = "exit" })
+		end
+		return false
+	end
 	if act == "sel" then
 		local id = tonumber(value)
 		if id == nil then
@@ -587,6 +653,8 @@ function M.init(args: { string }, saved: any, cfg: Config.Config, env: Env): (St
 		timer = nil,
 		loaded = false,
 		from = nil,
+		ascend = false,
+		held = launch.hold == true,
 		failures = 0,
 		err = nil,
 		stopped = false,
@@ -615,6 +683,10 @@ function M.init(args: { string }, saved: any, cfg: Config.Config, env: Env): (St
 				end
 			end
 		end
+		if saved.started == true then
+			-- The user pressed Enter before this restart.
+			s.held = false
+		end
 	end
 	local effects: { Effect } = {}
 	if wanted then
@@ -631,10 +703,13 @@ function M.init(args: { string }, saved: any, cfg: Config.Config, env: Env): (St
 				Errors.NO_CONNECTION
 			)
 			s.stopped = true
+			s.held = false
 			return s, effects
 		end
 	end
-	startQuery(s, effects)
+	if not s.held then
+		startQuery(s, effects)
+	end
 	return s, effects
 end
 
@@ -670,6 +745,7 @@ function M.save(s: State): any
 		connection = if tg then tg.id else nil,
 		filter = s.filterText,
 		level = s.level,
+		started = not s.held,
 	}
 end
 

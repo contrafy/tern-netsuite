@@ -193,9 +193,30 @@ local HEALTHY: { [string]: boolean } = { ok = true, warn = true }
 local BAD: { [string]: boolean } = { error = true, failed = true }
 
 -- Whether going from `prev` to `next` is news: a healthy connection turning
--- bad. Startup (nil/pending) and missing credentials never toast.
+-- bad, or one with a failing check starting to report errors (a broken
+-- check must not silence error toasts). Startup (nil/pending) and missing
+-- credentials never toast.
 function M.shouldToast(prev: ConnState?, next: ConnState): boolean
+	if prev == "failed" then
+		return next == "error"
+	end
 	return prev ~= nil and HEALTHY[prev] == true and BAD[next] == true
+end
+
+-- Whether `c`'s summary may replace `prev`, the one last published: a window
+-- that just took over polling has run few checks, and a summary with the
+-- rest pending would hide a published error until the round completes.
+-- Missing credentials are always news.
+function M.publishable(c: Conn, specs: { Checks.Spec }, prev: Summary?): boolean
+	if c.notConnected or prev == nil or prev.state == "pending" or prev.state == "not_connected" then
+		return true
+	end
+	for _, s in specs do
+		if s.connection == c.id and c.results[s.key] == nil then
+			return false
+		end
+	end
+	return true
 end
 
 return M

@@ -309,6 +309,53 @@ local function dock(s: State): Node?
 end
 
 local HINT = "j/k move · enter detail · / filter · l level · p pause · c connection · r reload · esc close"
+local HELD_HINT = "enter starts · esc closes"
+
+local function sinceText(since: { at: string?, minutes: number? }?): string
+	if since == nil then
+		return "the newest rows"
+	elseif since.minutes then
+		return string.format("%d minutes ago", since.minutes)
+	end
+	return since.at or ""
+end
+
+-- A block opened from a plain link: what it would read, and that nothing
+-- runs until Enter (any program can print such a link).
+local function heldView(s: State): { main: Node, dock: Node? }
+	local tg = State.target(s)
+	local conn: { Node } = {
+		ui.text({ ui.span("Connection  ", "muted") }),
+		ui.badge(
+			if tg then tg.id .. " · " .. tg.account_label else "none",
+			if tg and tg.production then "error" else "accent"
+		),
+	}
+	if tg and tg.production then
+		table.insert(conn, ui.badge("PROD", "error"))
+	end
+	local scripts = if #s.scope.scripts > 0 then table.concat(s.scope.scripts, ", ") else "all scripts"
+	local body: { Node } = {
+		ui.row(conn, { key = "hconn" }),
+		ui.text({ ui.span("Scripts     ", "muted"), ui.span(scripts) }, { key = "hscripts" }),
+		ui.text({ ui.span("Since       ", "muted"), ui.span(sinceText(s.scope.since)) }, { key = "hsince" }),
+		ui.text({
+			ui.span("Opened from a link: nothing is queried until you press Enter.", "muted"),
+		}, { key = "hwhy" }),
+		ui.row({
+			chip("Enter starts", "accent", "start", "start"),
+			chip("Close", "neutral", "close", "close"),
+		}, { key = "hact" }),
+	}
+	local children: { Node } = {
+		ui.card({ ui.span("Tail NetSuite execution logs?", "strong") }, body, { key = "held" }),
+	}
+	if s.notice then
+		table.insert(children, ui.text({ ui.span(s.notice, "warning") }, { key = "notice" }))
+	end
+	table.insert(children, ui.muted(HELD_HINT, { key = "keys" }))
+	return { main = ui.col(children), dock = nil }
+end
 
 function M.view(s: State): { main: Node, dock: Node? }
 	if #s.targets == 0 then
@@ -327,6 +374,9 @@ function M.view(s: State): { main: Node, dock: Node? }
 				}, { key = "card" }),
 			}),
 		}
+	end
+	if State.held(s) then
+		return heldView(s)
 	end
 	local children: { Node } = { header(s) }
 	local scope = scopeLine(s)
@@ -350,7 +400,7 @@ end
 function M.title(s: State): string
 	local tg = State.target(s)
 	local base = if tg then "NetSuite logs · " .. tg.id else "NetSuite logs"
-	return if s.paused then base .. " (paused)" else base
+	return if s.held then base .. " (press Enter)" elseif s.paused then base .. " (paused)" else base
 end
 
 return M

@@ -291,17 +291,135 @@ describe("the execution log block", function()
 		expect(State.level(r)).toBe(State.level(s))
 	end)
 
+	-- Rows at `logged`, with ids from `first` up.
+	local function burst(first: number, n: number, logged: string): { any }
+		local out = {}
+		for i = 1, n do
+			local r = table.clone(rows[1])
+			r.internalid = first + i
+			r.logged = logged
+			table.insert(out, r)
+		end
+		return out
+	end
+
+	-- Runs the pending timer and answers its query with `page`.
+	local function poll(
+		s: State.State,
+		effects: { State.Effect },
+		page: { any },
+		full: boolean
+	): (State.State, { State.Effect }, State.Effect)
+		local timer = only(effects, "timer") :: State.Effect
+		local s2, tick = State.update(s, { t = "tick", req = timer.req })
+		local q = only(tick, "query") :: State.Effect
+		local s3, after = State.update(s2, { t = "result", req = q.req, rows = page, truncated = full, at = "x" })
+		return s3, after, q
+	end
+
+	local function nextParams(s: State.State, effects: { State.Effect }): { any }
+		local timer = only(effects, "timer") :: State.Effect
+		local _, tick = State.update(s, { t = "tick", req = timer.req })
+		return (only(tick, "query") :: State.Effect).params :: { any }
+	end
+
 	it("does not stall when a full page holds only rows it has already seen", function()
 		local s, effects = loaded()
-		local timer = only(effects, "timer") :: State.Effect
-		s, effects = State.update(s, { t = "tick", req = timer.req })
+		-- The overlap window re-reads a full page of known rows: continue from
+		-- the page's newest row instead of jumping past unseen ones.
+		s, effects = poll(s, effects, { rows[7] }, true)
+		expect((only(effects, "timer") :: State.Effect).ms).toBe(0)
+		expect(nextParams(s, effects)).toEqual({ "2026-10-08 22:16:09" })
+		expect(s.notice).toBeNil()
+		-- Still a full page of known rows from that very second: only now skip it.
+		s, effects = poll(s, effects, { rows[7] }, true)
+		expect(nextParams(s, effects)).toEqual({ "2026-10-08 22:16:10" })
+		expect(s.notice).toContain("2026-10-08 22:16:09")
+	end)
+
+	it("continues a full page from the page's newest row so late rows before the newest seen one are read", function()
+		local s, effects = loaded()
+		s, effects = poll(s, effects, burst(6000000, 5, "2026-10-08 22:15:00"), true)
+		-- The buffer already holds 22:16:09; rows between 22:15:00 and it may
+		-- still be unread past the page cut.
+		expect(nextParams(s, effects)).toEqual({ "2026-10-08 22:15:00" })
+		expect(s.notice).toBeNil()
+	end)
+
+	it("never shows a row twice when a later poll re-reads rows a full page moved past", function()
+		local s, effects = loaded()
+		s, effects = poll(s, effects, burst(6000000, 3, "2026-10-08 22:16:20"), true)
+		-- The burst ended; the next poll starts in the overlap window again and
+		-- returns rows from before the burst.
+		s, effects = poll(s, effects, { rows[7], rows[1] }, false)
+		s = poll(s, effects, { rows[7] }, false)
+		local ids: { [number]: boolean } = {}
+		for _, e in State.visible(s) do
+			expect(ids[e.id]).toBeNil()
+			ids[e.id] = true
+		end
+		expect(#State.visible(s)).toBe(10)
+	end)
+
+	it("reads a burst in full after an empty first load instead of only its newest 200 rows", function()
+		local s, effects = State.init({ "script=customscript_a" }, nil, cfg, env)
 		local q = only(effects, "query") :: State.Effect
-		s, effects = State.update(s, { t = "result", req = q.req, rows = { rows[7] }, truncated = true, at = "x" })
-		timer = only(effects, "timer") :: State.Effect
-		expect(timer.ms).toBe(0)
-		local _, polled = State.update(s, { t = "tick", req = timer.req })
-		q = only(polled, "query") :: State.Effect
-		expect(q.params).toEqual({ "2026-10-08 22:16:10" })
+		s, effects = State.update(s, { t = "result", req = q.req, rows = {}, truncated = false, at = "x" })
+		local timer = only(effects, "timer") :: State.Effect
+		local s2, tick = State.update(s, { t = "tick", req = timer.req })
+		q = only(tick, "query") :: State.Effect
+		expect(q.max_rows).toBe(State.POLL_ROWS)
+		expect(q.sql).toContain("ORDER BY n.date, n.internalid)")
+		local _, after = State.update(
+			s2,
+			{ t = "result", req = q.req, rows = burst(6000000, 3, "2026-10-08 22:16:20"), truncated = true, at = "x" }
+		)
+		expect((only(after, "timer") :: State.Effect).ms).toBe(0)
+	end)
+
+	it("never retries a failing connection more often than a healthy one is polled", function()
+		for _, kind in { "network", "rate_limit", "server" } do
+			for failures = 1, 6 do
+				expect(State.backoff(failures, kind, 600000) >= 600000).toBe(true)
+			end
+		end
+	end)
+
+	describe("opened from a link", function()
+		local args = { "connection=prod-rest", "script=customscript_a", "since=30m", "hold=1" }
+
+		it("queries nothing until Enter, so a printed link cannot start NetSuite queries", function()
+			local s, effects = State.init(args, nil, cfg, env)
+			expect(only(effects, "query")).toBeNil()
+			expect(State.held(s)).toBe(true)
+			for _, k in { "p", "r", "c", "l", "j" } do
+				local _, e = press(s, k, k)
+				expect(only(e, "query")).toBeNil()
+			end
+			for _, act in { "pause", "reload", "conn" } do
+				local _, e = State.update(s, { t = "action", act = act, value = "sb-rest" })
+				expect(only(e, "query")).toBeNil()
+			end
+			local started, e = press(s, "enter")
+			local q = only(e, "query") :: State.Effect
+			expect(q.connection).toBe("prod-rest")
+			expect(q.params).toEqual({ "customscript_a", 30 } :: { any })
+			expect(State.held(started)).toBe(false)
+		end)
+
+		it("still closes on escape while waiting", function()
+			local s = State.init(args, nil, cfg, env)
+			local _, e = press(s, "escape")
+			expect(only(e, "exit") ~= nil).toBe(true)
+		end)
+
+		it("keeps tailing after a restart once the user started it", function()
+			local s = State.init(args, nil, cfg, env)
+			s = press(s, "enter")
+			local r, effects = State.init(args, State.save(s), cfg, env)
+			expect(State.held(r)).toBe(false)
+			expect(only(effects, "query") ~= nil).toBe(true)
+		end)
 	end)
 
 	it("closes on escape", function()

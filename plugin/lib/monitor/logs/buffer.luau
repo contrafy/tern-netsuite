@@ -75,13 +75,18 @@ function M.merge(b: Buffer, list: { Entry }): (Buffer, number)
 		#fresh
 end
 
--- Forgets dedupe ids logged before `from` (the next poll cannot return them).
+-- Forgets dedupe ids logged before `from` (the next poll cannot return
+-- them), except those of rows still held: a server that returns an older
+-- row anyway must not add it twice (the view keys rows by id).
 function M.prune(b: Buffer, from: string): Buffer
 	local seen: { [number]: string } = {}
 	for id, logged in b.seen do
 		if logged >= from then
 			seen[id] = logged
 		end
+	end
+	for _, e in b.entries do
+		seen[e.id] = e.logged
 	end
 	return { entries = b.entries, seen = seen, watermark = b.watermark, cap = b.cap, dropped = b.dropped }
 end

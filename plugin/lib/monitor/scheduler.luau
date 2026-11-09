@@ -163,12 +163,15 @@ function M.nextWake(s: State, jobs: { Job }, now: number): number?
 	return wake
 end
 
+local function validLease(c: any): boolean
+	return type(c) == "table" and type(c.owner) == "string" and type(c.expires) == "number"
+end
+
 -- The lease `me` should hold after this check, or nil when another live
 -- holder keeps it. `force` takes it regardless (manual refresh).
 function M.lease(current: Lease?, me: string, now: number, ttl: number, force: boolean?): Lease?
 	local c: any = current
-	local valid = type(c) == "table" and type(c.owner) == "string" and type(c.expires) == "number"
-	if force or not valid or c.owner == me or c.expires <= now then
+	if force or not validLease(c) or c.owner == me or c.expires <= now then
 		return { owner = me, expires = now + ttl, ttl = ttl }
 	end
 	return nil
@@ -176,7 +179,41 @@ end
 
 -- Whether a held lease is past half its life and should be written again.
 function M.needsRenewal(l: Lease, now: number): boolean
-	return l.expires - now < l.ttl / 2
+	return type(l.ttl) ~= "number" or l.expires - now < l.ttl / 2
+end
+
+-- Whether the stored lease `v` (read back after a claim) names `me`.
+function M.holds(v: any, me: string): boolean
+	return validLease(v) and v.owner == me
+end
+
+export type LeaseAction = "wait" | "follow" | "claim" | "renew" | "poll"
+
+-- What a window does with the lease on a tick, given whether reading it
+-- worked and what it read. "wait": the read failed, keep the current role
+-- (an unreadable lease is not a free one); "follow": another window polls;
+-- "claim": write the returned lease, then poll only if a read-back `holds`
+-- it (two windows may claim at once); "renew": write it and poll; "poll".
+function M.leaseStep(
+	readOk: boolean,
+	current: any,
+	me: string,
+	now: number,
+	ttl: number,
+	force: boolean?
+): (LeaseAction, Lease?)
+	if not readOk then
+		return "wait", nil
+	end
+	local lease = M.lease(current, me, now, ttl, force)
+	if lease == nil then
+		return "follow", nil
+	elseif not M.holds(current, me) then
+		return "claim", lease
+	elseif M.needsRenewal(current, now) then
+		return "renew", lease
+	end
+	return "poll", nil
 end
 
 return M

@@ -153,7 +153,7 @@ local function card(e: Entry, now: number, i: number): Node
 		table.insert(
 			body,
 			ui.muted(
-				"Store credentials with the palette command Tern NetSuite: Connect account, then press r.",
+				"Store credentials with the palette command Tern NetSuite: Connect account; polling resumes once its test query succeeds.",
 				{ key = "nchint" }
 			)
 		)

@@ -238,7 +238,6 @@ describe("connections", function()
 		expect(c.auth).toBe("tba")
 		expect(c.transport).toBe("rest")
 		expect(c.restlet).toBeNil()
-		expect(c.allow_deployment_changes).toBe(false)
 	end)
 
 	it("drops a connection naming an unknown account", function()
@@ -296,18 +295,6 @@ describe("connections", function()
 			parse('{"accounts": [' .. ACCOUNT .. '], "connections": [{"id": "c", "account": "sb", "auth": "basic"}]}')
 		expect(cfg.connections).toEqual({})
 		expect(levelOf(diags, "connections[1].auth")).toBe("error")
-	end)
-
-	it("enables deployment changes only when the connection opts in explicitly", function()
-		local cfg, diags = parse(
-			'{"accounts": ['
-				.. ACCOUNT
-				.. '], "connections": [{"id": "c", "account": "sb", "allow_deployment_changes": true},'
-				.. ' {"id": "d", "account": "sb", "allow_deployment_changes": "yes"}]}'
-		)
-		expect(cfg.connections[1].allow_deployment_changes).toBe(true)
-		expect(cfg.connections[2].allow_deployment_changes).toBe(false)
-		expect(levelOf(diags, "connections[2].allow_deployment_changes")).toBe("error")
 	end)
 end)
 

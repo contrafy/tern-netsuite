@@ -43,9 +43,6 @@ export type Connection = {
 	auth: Auth,
 	transport: Transport,
 	read_only: boolean,
-	-- Script deployment changes through the REST record API; off unless the
-	-- connection opts in. Every change still needs approval.
-	allow_deployment_changes: boolean,
 	timeout_ms: number,
 	restlet: Restlet?,
 }
@@ -468,12 +465,7 @@ end
 local function connections(ctx: Ctx, v: any, path: string, accountIds: { [string]: boolean }): { Connection }
 	local ids: { [string]: boolean } = {}
 	return records(ctx, v, path, function(raw: any, p: string): Connection?
-		unknownKeys(
-			ctx,
-			raw,
-			p,
-			{ "id", "account", "auth", "transport", "read_only", "allow_deployment_changes", "timeout_ms", "restlet" }
-		)
+		unknownKeys(ctx, raw, p, { "id", "account", "auth", "transport", "read_only", "timeout_ms", "restlet" })
 		local id = required(ctx, raw.id, p .. ".id")
 		local account = required(ctx, raw.account, p .. ".account")
 		if id == nil or account == nil then
@@ -520,7 +512,6 @@ local function connections(ctx: Ctx, v: any, path: string, accountIds: { [string
 			auth = auth :: Auth,
 			transport = transport :: Transport,
 			read_only = bool(ctx, raw.read_only, p .. ".read_only", true),
-			allow_deployment_changes = bool(ctx, raw.allow_deployment_changes, p .. ".allow_deployment_changes", false),
 			timeout_ms = int(ctx, raw.timeout_ms, p .. ".timeout_ms", 30000, 1000, 300000),
 			restlet = rl,
 		}

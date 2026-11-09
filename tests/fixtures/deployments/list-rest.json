@@ -1,0 +1,7 @@
+{"links":[],"count":5,"hasMore":false,"items":[
+{"links":[],"id":"201","scriptid":"customdeploy_acme_billing_sync","title":"Billing Sync","status":"NOTSCHEDULED","isdeployed":"T","loglevel":"AUDIT","script_id":"101","script":"customscript_acme_billing_sync","script_name":"Acme Billing Sync","scripttype":"MAPREDUCE"},
+{"links":[],"id":"202","scriptid":"customdeploy_acme_nightly_export","title":"Nightly Export","status":"SCHEDULED","isdeployed":"T","loglevel":"ERROR","script_id":"102","script":"customscript_acme_nightly_export","script_name":"Acme Nightly Export","scripttype":"SCHEDULED"},
+{"links":[],"id":"203","scriptid":"customdeploy_acme_order_ue","title":"Order Guard","status":"RELEASED","isdeployed":"T","loglevel":"DEBUG","recordtype":"SALESORDER","script_id":"103","script":"customscript_acme_order_ue","script_name":"Acme Order Guard","scripttype":"USEREVENT"},
+{"links":[],"id":"204","scriptid":"customdeploy_acme_storefront_api","title":"Storefront API","status":"TESTING","isdeployed":"F","loglevel":"DEBUG","script_id":"104","script":"customscript_acme_storefront_api","script_name":"Acme Storefront API","scripttype":"RESTLET"},
+{"links":[],"id":"205","scriptid":"customdeploy_acme_label_print","title":"Label Print","status":"RELEASED","isdeployed":"T","loglevel":"EMERGENCY","script_id":"105","script":"customscript_acme_label_print","script_name":"Acme Label Print","scripttype":"SCRIPTLET"}
+],"offset":0,"totalResults":5}

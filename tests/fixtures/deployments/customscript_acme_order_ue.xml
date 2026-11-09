@@ -1,0 +1,22 @@
+<usereventscript scriptid="customscript_acme_order_ue">
+	<description></description>
+	<isinactive>F</isinactive>
+	<name>Acme Order Guard</name>
+	<notifyowner>T</notifyowner>
+	<scriptfile>[/SuiteScripts/orders/order_guard_ue.js]</scriptfile>
+	<scriptdeployments>
+		<scriptdeployment scriptid="customdeploy_acme_order_ue">
+			<allroles>T</allroles>
+			<isdeployed>T</isdeployed>
+			<loglevel> DEBUG </loglevel>
+			<recordtype>SALESORDER</recordtype>
+			<status>RELEASED</status>
+		</scriptdeployment>
+		<scriptdeployment scriptid="customdeploy_acme_order_ue_po">
+			<allroles>T</allroles>
+			<isdeployed>F</isdeployed>
+			<recordtype>PURCHASEORDER</recordtype>
+			<status>TESTING</status>
+		</scriptdeployment>
+	</scriptdeployments>
+</usereventscript>

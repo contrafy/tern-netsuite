@@ -267,4 +267,39 @@ describe("view", function()
 	end)
 end)
 
+describe("review fixes", function()
+	it("hands a cleared script id back to the name, and the file name with it", function()
+		local s = typeText(ready(), "Order Stamp")
+		s = key(s, "tab")
+		s = typeText(s, "_ue")
+		s = key(s, "u", { ctrl = true })
+		-- Empty on screen so typing replaces it, but planned from the name.
+		expect(s.values.scriptIdSuffix).toBe("")
+		expect(s.values.fileName).toBe("order_stamp.js")
+		expect(Form.form(s).scriptIdSuffix).toBe("order_stamp")
+		local _, found = Form.plan(s)
+		for _, pr in found do
+			expect(pr.field ~= "scriptIdSuffix").toBe(true)
+		end
+		s = typeText(s, "x")
+		expect(s.values.scriptIdSuffix).toBe("x")
+		expect(s.values.fileName).toBe("x.js")
+	end)
+
+	it("names the file after the planned id when a customscript_ id is pasted", function()
+		local s = typeText(ready(), "Order Stamp")
+		s = key(s, "tab")
+		s = key(s, "u", { ctrl = true })
+		s = key(s, "paste", { text = "customscript_demo_x" })
+		expect(s.values.fileName).toBe("demo_x.js")
+	end)
+
+	it("starts a SuiteApp's folder at /SuiteApps/<publisherid>.<projectid>", function()
+		local manifest = '<manifest projecttype="SUITEAPP"><publisherid>com.acme</publisherid>'
+			.. "<projectid>storefront</projectid><projectname>Storefront</projectname></manifest>"
+		local s = ready({ ["src/manifest.xml"] = manifest })
+		expect(s.values.folder).toBe("/SuiteApps/com.acme.storefront")
+	end)
+end)
+
 return nil

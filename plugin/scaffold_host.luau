@@ -137,14 +137,74 @@ local function writeAll(root: string, writes: { Plan.Write }, edits: { Plan.Edit
 	return written, nil
 end
 
+-- For the project root, then each path: the root's realpath, then "L" for a
+-- symlink (dangling ones included) or the realpath of the nearest existing
+-- ancestor (the path itself when it exists). NUL-separated.
+local RESOLVE_SCRIPT = [[
+r=$(realpath "$1") || exit 1
+printf '%s\0' "$r"
+shift
+for f; do
+	if [ -L "$f" ]; then printf 'L\0'; continue; fi
+	d=$f
+	while [ ! -e "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+	printf '%s\0' "$(realpath "$d" 2>/dev/null)"
+done
+]]
+
+M.RESOLVE_TIMEOUT_MS = 5000
+
+-- Why a write or edit would leave the project or go through a symlink, or nil.
+local function checkTargets(root: string, paths: { string }, cb: (err: string?) -> ())
+	local argv = { "sh", "-c", RESOLVE_SCRIPT, "sh", root }
+	for _, p in paths do
+		table.insert(argv, root .. "/" .. p)
+	end
+	local function done(result: ProcessResult)
+		local parts = string.split(result.stdout, "\0")
+		if result.status ~= 0 or #parts < #paths + 1 then
+			cb("could not resolve the project paths; nothing was written")
+			return
+		end
+		for i, p in paths do
+			local bad = Plan.unsafeTarget(parts[1], p, parts[i + 1])
+			if bad then
+				cb(bad .. "; nothing was written")
+				return
+			end
+		end
+		cb(nil)
+	end
+	local ok, err = pcall(function()
+		tern.process.run(argv, { timeout_ms = M.RESOLVE_TIMEOUT_MS }, done)
+	end)
+	if not ok then
+		done({ status = -1, stdout = "", stderr = tostring(err), timed_out = false })
+	end
+end
+
 local function write(h: Host, e: Effect)
 	local writes: { Plan.Write } = e.writes or {}
 	local edits: { Plan.Edit } = e.edits or {}
-	local written, err = writeAll(e.root :: string, writes, edits)
-	if err and #written > 0 then
-		err ..= " (already written: " .. table.concat(written, ", ") .. ")"
+	local root = e.root :: string
+	local paths: { string } = {}
+	for _, w in writes do
+		table.insert(paths, w.path)
 	end
-	deliver(h, { t = "written", gen = e.gen, written = written, err = err })
+	for _, ed in edits do
+		table.insert(paths, ed.path)
+	end
+	checkTargets(root, paths, function(unsafe: string?)
+		if unsafe then
+			deliver(h, { t = "written", gen = e.gen, written = {}, err = unsafe })
+			return
+		end
+		local written, err = writeAll(root, writes, edits)
+		if err and #written > 0 then
+			err ..= " (already written: " .. table.concat(written, ", ") .. ")"
+		end
+		deliver(h, { t = "written", gen = e.gen, written = written, err = err })
+	end)
 end
 
 local function focus(h: Host, id: string)

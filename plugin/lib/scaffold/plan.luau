@@ -74,6 +74,54 @@ M.MAX_SUFFIX = M.MAX_SCRIPT_ID - #M.SCRIPT_PREFIX
 -- sdf_metadata.xml: name length="40".
 M.MAX_NAME = 40
 M.ROOT_FOLDER = "/SuiteScripts"
+M.SUITEAPPS_FOLDER = "/SuiteApps"
+
+-- The File Cabinet folder scripts are created under. A SuiteApp only deploys
+-- files below /SuiteApps/<publisherid>.<projectid> (the CLI's file:create
+-- offers only that folder), so its scripts are rooted there; an account
+-- customization uses /SuiteScripts. Nil and why when a SuiteApp manifest
+-- lacks the ids.
+function M.rootFolder(project: Project): (string?, string?)
+	local manifest = project.manifest
+	if manifest == nil or manifest.projectType ~= "SUITEAPP" then
+		return M.ROOT_FOLDER
+	end
+	local publisher, id = manifest.publisherId, manifest.projectId
+	if publisher == nil or publisher == "" or id == nil or id == "" then
+		return nil, "manifest.xml of a SuiteApp needs <publisherid> and <projectid>"
+	end
+	return M.SUITEAPPS_FOLDER .. "/" .. publisher .. "." .. id
+end
+
+-- Why the project's folder (defaultProjectFolder in suitecloud.config.js)
+-- cannot be written to, or nil. It must stay inside the project root.
+function M.badProjectFolder(folder: string): string?
+	if string.sub(folder, 1, 1) == "/" then
+		return "the project folder " .. folder .. " is absolute; it must be inside the project"
+	end
+	for part in string.gmatch(folder, "[^/]+") do
+		if part == ".." then
+			return "the project folder " .. folder .. " leaves the project"
+		end
+	end
+	return nil
+end
+
+-- Why writing `path` (relative to the project) is refused, given the
+-- project's realpath and what realpath(1) made of the path: "L" when the
+-- path itself is a symlink, else the realpath of its nearest existing
+-- ancestor (the path itself when it exists), "" when that failed. Nil
+-- when the write stays inside the project.
+function M.unsafeTarget(rootReal: string, path: string, resolved: string): string?
+	if resolved == "L" then
+		return path .. " is a symlink"
+	elseif resolved == "" then
+		return path .. " could not be resolved"
+	elseif resolved ~= rootReal and string.sub(resolved, 1, #rootReal + 1) ~= rootReal .. "/" then
+		return path .. " resolves outside the project (" .. resolved .. ")"
+	end
+	return nil
+end
 
 local function trim(s: string): string
 	return string.match(s, "^%s*(.-)%s*$") :: string
@@ -118,14 +166,20 @@ local function normalizeRecordType(rt: string?): string?
 	return string.upper(v)
 end
 
+-- A typed script id as planned: trimmed, a pasted customscript_ dropped.
+function M.normalizeSuffix(raw: string): string
+	local suffix = trim(raw)
+	if string.sub(suffix, 1, #M.SCRIPT_PREFIX) == M.SCRIPT_PREFIX then
+		suffix = string.sub(suffix, #M.SCRIPT_PREFIX + 1)
+	end
+	return suffix
+end
+
 -- The form as planned: trimmed, the customscript_ prefix dropped from a
 -- pasted id, ".js" added to a bare file name, folder and record type in SDF
 -- form, title defaulted to the name.
 function M.normalize(form: Form): Form
-	local suffix = trim(form.scriptIdSuffix)
-	if string.sub(suffix, 1, #M.SCRIPT_PREFIX) == M.SCRIPT_PREFIX then
-		suffix = string.sub(suffix, #M.SCRIPT_PREFIX + 1)
-	end
+	local suffix = M.normalizeSuffix(form.scriptIdSuffix)
 	local fileName = trim(form.fileName)
 	if fileName ~= "" and not string.find(fileName, "%.[^%.]*$") then
 		fileName ..= ".js"
@@ -159,7 +213,7 @@ local function badFileName(name: string): string?
 	return nil
 end
 
-local function validateForm(f: Form, kind: Kind, problems: { Problem })
+local function validateForm(f: Form, kind: Kind, root: string, problems: { Problem })
 	local function problem(field: string, message: string)
 		table.insert(problems, { field = field, message = message })
 	end
@@ -202,8 +256,8 @@ local function validateForm(f: Form, kind: Kind, problems: { Problem })
 	end
 
 	local folder = f.folder
-	if folder ~= M.ROOT_FOLDER and string.sub(folder, 1, #M.ROOT_FOLDER + 1) ~= M.ROOT_FOLDER .. "/" then
-		problem("folder", "scripts live in " .. M.ROOT_FOLDER .. " or a folder below it")
+	if folder ~= root and string.sub(folder, 1, #root + 1) ~= root .. "/" then
+		problem("folder", "scripts live in " .. root .. " or a folder below it")
 	else
 		for part in string.gmatch(folder, "[^/]+") do
 			local bad = if part == "." or part == ".." then "cannot be . or .." else badFileName(part)
@@ -356,7 +410,12 @@ local function planEdits(project: Project, p: Plan, inputs: Inputs, problems: { 
 		end
 		if #adds > 0 then
 			local text = inputs.deployText
-			local to, err = if text then Edits.addDeployPaths(text, adds) else nil, "deploy.xml was not read"
+			local to: string?, err: string?
+			if text then
+				to, err = Edits.addDeployPaths(text, adds)
+			else
+				err = "deploy.xml was not read"
+			end
 			if text and to then
 				local what = {}
 				for _, a in adds do
@@ -379,7 +438,12 @@ local function planEdits(project: Project, p: Plan, inputs: Inputs, problems: { 
 		table.insert(problems, { field = "project", message = "manifest.xml is missing or does not parse" })
 	elseif not hasRequiredFeature(project, Kinds.FEATURE) then
 		local text = inputs.manifestText
-		local to, err = if text then Edits.requireFeature(text, Kinds.FEATURE) else nil, "manifest.xml was not read"
+		local to: string?, err: string?
+		if text then
+			to, err = Edits.requireFeature(text, Kinds.FEATURE)
+		else
+			err = "manifest.xml was not read"
+		end
 		if text and to then
 			table.insert(p.edits, {
 				path = manifest.path,
@@ -401,8 +465,16 @@ function M.plan(project: Project, form: Form, inputs: Inputs?): (Plan?, { Proble
 	if kind == nil then
 		return nil, { { field = "scriptType", message = "unknown script type " .. form.scriptType } }
 	end
+	local badFolder = M.badProjectFolder(project.projectFolder)
+	if badFolder then
+		return nil, { { field = "project", message = badFolder } }
+	end
+	local root, rootProblem = M.rootFolder(project)
+	if root == nil then
+		return nil, { { field = "project", message = rootProblem or "the project has no script folder" } }
+	end
 	local f = M.normalize(form)
-	validateForm(f, kind, problems)
+	validateForm(f, kind, root, problems)
 	for _, pr in problems do
 		if pr.field == "scriptIdSuffix" or pr.field == "fileName" or pr.field == "folder" then
 			return nil, problems

@@ -193,13 +193,32 @@ function M.init(opts: { cwd: string, program: string? }): (State, { Effect })
 	return s, { { t = "find", cwd = opts.cwd }, { t = "templates" }, { t = "focus", id = M.INPUT_PREFIX .. "name" } }
 end
 
+-- The script id suffix and file name the plan uses: a field the user has
+-- not typed into (or cleared) follows the name. A cleared field stays empty
+-- on screen, so typing replaces it, while the plan still has a value.
+local function derived(s: State): (string, string)
+	local v = s.values
+	local suffix = v.scriptIdSuffix
+	if suffix == "" and not s.touched.scriptIdSuffix then
+		suffix = Plan.suffixFrom(v.name)
+	end
+	local fileName = v.fileName
+	if fileName == "" and not s.touched.fileName then
+		-- From the suffix as planned, so a pasted customscript_ prefix is dropped.
+		local planned = Plan.normalizeSuffix(suffix)
+		fileName = if planned == "" then "" else planned .. ".js"
+	end
+	return suffix, fileName
+end
+
 function M.form(s: State): Plan.Form
 	local v = s.values
+	local suffix, fileName = derived(s)
 	return {
 		scriptType = v.scriptType,
 		name = v.name,
-		scriptIdSuffix = v.scriptIdSuffix,
-		fileName = v.fileName,
+		scriptIdSuffix = suffix,
+		fileName = fileName,
 		folder = v.folder,
 		deploy = {
 			status = v.status,
@@ -240,11 +259,15 @@ local function setValues(s: State, changes: { [string]: string }, touch: string?
 	for k, val in changes do
 		v[k] = val
 	end
-	if changes.name ~= nil and not touched.scriptIdSuffix then
+	-- Untouched fields follow the name; the one just cleared stays empty
+	-- (derived() fills it for the plan).
+	if not touched.scriptIdSuffix and touch ~= "scriptIdSuffix" then
 		v.scriptIdSuffix = Plan.suffixFrom(v.name)
 	end
-	if (changes.name ~= nil or changes.scriptIdSuffix ~= nil) and not touched.fileName then
-		v.fileName = if v.scriptIdSuffix == "" then "" else v.scriptIdSuffix .. ".js"
+	if not touched.fileName and touch ~= "fileName" then
+		v.fileName = ""
+		local _, fileName = derived(with(s, { values = v, touched = touched }))
+		v.fileName = fileName
 	end
 	return with(s, { values = v, touched = touched, notice = nil })
 end
@@ -488,8 +511,15 @@ local function scanned(s: State, msg: Msg): State
 	end
 	local project = Project.build(snapshot)
 	local folder = project.projectFolder
+	local values = s.values
+	if not s.touched.folder then
+		-- A SuiteApp roots its scripts at /SuiteApps/<publisherid>.<projectid>.
+		values = table.clone(values)
+		values.folder = Plan.rootFolder(project) or Plan.ROOT_FOLDER
+	end
 	local n = with(s, {
 		project = project,
+		values = values,
 		deployText = textOf(snapshot, folder .. "/deploy.xml"),
 		manifestText = textOf(snapshot, folder .. "/manifest.xml"),
 	})
@@ -593,7 +623,7 @@ local PLACEHOLDERS: { [string]: string } = {
 	name = "shown in NetSuite, at most 40 characters",
 	scriptIdSuffix = "after customscript_ / customdeploy_",
 	fileName = "<script id>.js",
-	folder = "/SuiteScripts/...",
+	folder = "<root folder>/...",
 	recordType = "SALESORDER, CUSTOMER, or customrecord_x",
 }
 
@@ -602,6 +632,16 @@ local function input(s: State, id: string): Node
 	local placeholder = PLACEHOLDERS[id]
 	if id == "title" then
 		placeholder = if s.values.name ~= "" then s.values.name .. " (the name)" else "defaults to the name"
+	elseif id == "folder" then
+		local project = s.project
+		local root = if project then Plan.rootFolder(project) else nil
+		placeholder = (root or Plan.ROOT_FOLDER) .. "/..."
+	elseif id == "scriptIdSuffix" or id == "fileName" then
+		local suffix, fileName = derived(s)
+		local value = if id == "scriptIdSuffix" then suffix else fileName
+		if value ~= "" then
+			placeholder = value .. " (from the name)"
+		end
 	end
 	return {
 		k = "input",

@@ -389,4 +389,71 @@ describe("form validation", function()
 	end)
 end)
 
+describe("review fixes", function()
+	it("reports why a deploy.xml edit failed instead of claiming the file was not read", function()
+		-- Parses, but the edit finds the commented-out <files> and no closing tag.
+		local deploy = "<deploy>\n    <!-- <files> -->\n    <objects>\n        <path>~/Objects/*</path>\n"
+			.. "    </objects>\n</deploy>\n"
+		local project, inputs = load("projects/orders", { ["src/deploy.xml"] = deploy })
+		local msg = problems(project, form("suitelet"), inputs).project
+		expect(msg).toContain("<files> is not closed")
+	end)
+
+	it("still says deploy.xml was not read when its text is missing", function()
+		local deploy = "<deploy>\n    <files>\n        <path>~/FileCabinet/Other/*</path>\n    </files>\n</deploy>\n"
+		local project = load("projects/orders", { ["src/deploy.xml"] = deploy })
+		expect(problems(project, form("suitelet"), {}).project).toBe("deploy.xml was not read")
+	end)
+
+	it("XML-escapes an & in the File Cabinet path added to deploy.xml", function()
+		local deploy = "<deploy>\n    <files>\n        <path>~/FileCabinet/Other/*</path>\n    </files>\n"
+			.. "    <objects>\n        <path>~/Objects/*</path>\n    </objects>\n</deploy>\n"
+		local project, inputs = load("projects/orders", { ["src/deploy.xml"] = deploy })
+		local p = plan(project, form("suitelet", { folder = "/SuiteScripts/R&D" }), inputs)
+		expect(p.edits[1].to).toContain("<path>~/FileCabinet/SuiteScripts/R&amp;D/demo_suitelet.js</path>")
+		local after = load("projects/orders", { ["src/deploy.xml"] = p.edits[1].to })
+		expect(Project.isDeployed(after, "files", p.scriptPath)).toBe(true)
+	end)
+
+	local suiteapp = '<manifest projecttype="SUITEAPP"><publisherid>com.acme</publisherid>'
+		.. "<projectid>billing</projectid><projectname>Billing</projectname><projectversion>1.0.0</projectversion>"
+		.. '<dependencies><features><feature required="true">SERVERSIDESCRIPTING</feature></features>'
+		.. "</dependencies></manifest>"
+
+	it("roots SuiteApp scripts at /SuiteApps/<publisherid>.<projectid>, the only folder a SuiteApp deploys", function()
+		local project, inputs = load("projects/orders", { ["src/manifest.xml"] = suiteapp })
+		expect((Plan.rootFolder(project))).toBe("/SuiteApps/com.acme.billing")
+		expect(problems(project, form("suitelet"), inputs).folder).toBe(
+			"scripts live in /SuiteApps/com.acme.billing or a folder below it"
+		)
+		local p = plan(project, form("suitelet", { folder = "/SuiteApps/com.acme.billing/demo" }), inputs)
+		expect(p.scriptPath).toBe("src/FileCabinet/SuiteApps/com.acme.billing/demo/demo_suitelet.js")
+		expect(p.writes[2].content).toContain("<scriptfile>[/SuiteApps/com.acme.billing/demo/demo_suitelet.js]")
+	end)
+
+	it("refuses a SuiteApp whose manifest lacks the publisher or project id", function()
+		local bad = (string.gsub(suiteapp, "<publisherid>com.acme</publisherid>", ""))
+		local project, inputs = load("projects/orders", { ["src/manifest.xml"] = bad })
+		expect(problems(project, form("suitelet"), inputs).project).toContain("<publisherid> and <projectid>")
+	end)
+
+	it("refuses a defaultProjectFolder that leaves the project or is absolute", function()
+		for _, folder in { "../elsewhere", "/abs/src", "src/../../x" } do
+			local config = "module.exports = { defaultProjectFolder: '" .. folder .. "' };"
+			local project = load("projects/orders", { ["suitecloud.config.js"] = config })
+			expect(problems(project, form("suitelet")).project).toContain("project folder")
+		end
+	end)
+
+	it("refuses targets that are symlinks, unresolved, or resolve outside the project", function()
+		local root = "/private/tmp/acme"
+		expect(Plan.unsafeTarget(root, "src/a.js", "/private/tmp/acme/src")).toBeNil()
+		expect(Plan.unsafeTarget(root, "src/a.js", root)).toBeNil()
+		expect(Plan.unsafeTarget(root, "src/a.js", "L")).toBe("src/a.js is a symlink")
+		expect(Plan.unsafeTarget(root, "src/a.js", "")).toBe("src/a.js could not be resolved")
+		expect(Plan.unsafeTarget(root, "src/a.js", "/private/tmp/acme-other/src")).toContain("outside the project")
+		expect(Plan.unsafeTarget(root, "src/a.js", "/etc")).toContain("outside the project")
+	end)
+end)
+
 return nil

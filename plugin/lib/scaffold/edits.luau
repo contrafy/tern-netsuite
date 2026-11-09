@@ -59,7 +59,9 @@ local function lastFind(text: string, needle: string, from: number, to: number):
 end
 
 local function addDeployPath(text: string, section: string, pattern: string): (string?, string?)
-	local entry = "<path>" .. pattern .. "</path>"
+	-- deployHas compares decoded text, so the escaped entry still matches.
+	local escaped = string.gsub(string.gsub(string.gsub(pattern, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+	local entry = "<path>" .. escaped .. "</path>"
 	local openTag = "<" .. section .. ">"
 	local open = string.find(text, openTag, 1, true)
 	if open then

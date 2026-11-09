@@ -1,13 +1,14 @@
 # tern-netsuite
 
 NetSuite for [Tern](https://stencil.so/tern): native views for the SuiteCloud SDF CLI,
-a production deploy guard, account status, an SDF project explorer, and
-read-only SuiteQL monitoring (execution logs, account health).
+a production deploy guard, account status, an SDF project explorer, drift
+against an account, and read-only SuiteQL tools (console, record inspector,
+script deployments, execution logs, account health).
 
 ![A failed project:validate rendered natively, errors grouped by object](docs/screenshots/lens-validate.png)
 
 Status: 0.1.0, public beta. Built and tested against SuiteCloud CLI 3.2.0 and
-Tern 0.6.3 / 0.7.0.
+Tern 0.6.3 through 0.9.13.
 
 ## Install
 
@@ -83,6 +84,18 @@ Everything in the "SDF CLI" section works with no NetSuite credentials. The
   uploads (recorded when the command finishes), guard decisions, and, with
   `history.ci.workflow` set, the repository's CI deploy runs from `gh` on one
   timeline; the status line adds the branch's latest CI deploy state.
+- **Drift** (`Tern NetSuite: Drift`): compares the project with an account
+  without writing to either. The account's copies of the project's objects
+  (`object:import`) and File Cabinet files (`file:import`) are imported into
+  a scratch project under the plugin's data directory (with a generated
+  minimal `suitecloud.config.js`, so project hooks never run), never into
+  your project. Each entry shows as same, changed (with a unified diff),
+  missing in the account, or error (for example an object locked by a
+  bundle). Object XML is compared after canonicalization, so indentation,
+  prolog, quoting and `<x/>` vs `<x></x>` are not drift. `o` adds the
+  account's objects that share the project's script ID prefixes (listed
+  only); `p` picks another auth ID. Without a cached result it runs at once
+  only against non-production accounts; production waits for Enter.
 
 | Status line | Deploy history |
 | --- | --- |
@@ -94,7 +107,9 @@ Running two account commands for the same auth ID at the same time can
 invalidate its token and force a browser re-login, so every account command
 the plugin starts (listings, imports, uploads) takes one machine-wide slot
 per auth ID: they never overlap, also across windows and plugin reloads, and
-a waiting pane says what it waits for.
+a waiting pane says what it waits for. With the shell guard sourced,
+account commands you type in a Tern pane wait for the same slot (see
+[shell/README.md](shell/README.md#one-account-command-per-auth-id)).
 
 `tern-netsuite://` links that any program prints never start work on their
 own: a bare link opens the block waiting for Enter (browser, logs) or is
@@ -133,6 +148,33 @@ Then:
 
   ![Account health dashboard](docs/screenshots/health.png)
 
+- **SuiteQL console** (`Tern NetSuite: SuiteQL console`): a multi-line
+  editor (Ctrl+Enter runs; Up on the first line and Down on the last recall
+  history) over a chosen connection; production connections and their
+  results carry a red PROD badge. Results show row count, timing and
+  truncation (`console.max_rows`), sort and filter, inspect a row, and open
+  a record in the inspector. Copy as CSV or TSV, save CSV or JSON next to
+  the pane's folder, or open the rows in Tern's table viewer. History and
+  saved queries live in the plugin's data folder; `console.saved_dirs` adds
+  folders of `.sql` files (read recursively, relative paths resolve against
+  the repository root). `Tern NetSuite: Run SuiteQL file` runs the focused
+  `.sql` file (production waits for Ctrl+Enter).
+- **Record inspector** (`Tern NetSuite: Inspect record`): paste a record URL
+  from the NetSuite UI or type `type:id` (`salesorder:123`,
+  `customrecord_acme_box:5`). Shows the record's fields (custom field labels
+  from SuiteQL; standard field labels from the REST metadata catalog on REST
+  connections, cached 7 days, `l` refreshes), system notes (who changed
+  which field, old -> new), related records and lines (Enter opens one in
+  place with Back, Shift+Enter in a new pane), and **Open in NetSuite**.
+  Execution log rows that mention a record offer Inspect.
+- **Script deployments** (`Tern NetSuite: Script deployments`): every
+  deployment of a connection with its script, type, status, log level,
+  record type and the script's log lines and errors over 24 h, with filters;
+  opens a deployment or its script in NetSuite and tails its logs. NetSuite's
+  REST API cannot change script deployments, so `e` changes log level or
+  status in the project's own SDF XML (diff preview, local file only) and
+  offers the `project:deploy` command to run through the guard.
+
 Queries run in the Tern window half (the keychain is only available
 there), so a Tern window must be open. Read-only connections
 (`read_only`, the default) refuse anything but a single `SELECT`/`WITH`.
@@ -156,6 +198,7 @@ every section with the values of an example setup (placeholder account ids).
 | `accounts` | `[{id, account_id, label?, production?, auth_ids}]` |
 | `guard` | `confirm_production`, `typed_confirmation`, `commands`, `timeout_s` |
 | `connections` | `[{id, account, auth, transport, read_only, timeout_ms, restlet?}]` |
+| `console` | `saved_dirs`, `max_rows` |
 | `monitor` | `poll_seconds`, `log_poll_seconds`, `log_title_json`, `script_errors`, `checks` |
 | `status` | `enabled` |
 | `scaffold` | `templates_dir` |

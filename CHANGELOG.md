@@ -40,3 +40,18 @@ First version.
 - New script: SuiteApp projects scaffold under
   `/SuiteApps/<publisherid>.<projectid>`; writes refuse symlinks and paths
   outside the project; the real deploy.xml / manifest.xml edit error shows.
+- The shell guard makes every SuiteCloud account command typed in a Tern
+  pane wait for the plugin's per-auth-ID CLI slot, so it never overlaps the
+  plugin's own listings, imports or uploads; a production command waits for
+  the slot only after approval.
+- SuiteQL console: multi-line editor with history, saved queries and `.sql`
+  folders (`console.saved_dirs`, recursive), PROD badges, a sortable and
+  filterable results grid, CSV/TSV copy, CSV/JSON files, Tern's table viewer,
+  and `Tern NetSuite: Run SuiteQL file`.
+- Record inspector: fields with custom and standard labels, system notes,
+  related records and lines, Open in NetSuite; log rows offer Inspect.
+- Script deployments: status, log level, record type and 24 h log counts per
+  deployment; changes go through the project's SDF XML and the guard.
+- Drift: compares a project's objects and File Cabinet files with any
+  configured account (read-only, scratch project, canonical XML comparison,
+  unified diffs, account-only listing, cached results).

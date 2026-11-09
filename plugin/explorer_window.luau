@@ -8,11 +8,11 @@
 -- `cd <project> && <plugin>/shell/tern-netsuite-guard suitecloud file:upload
 -- --paths <path>` (lib/explorer/upload.luau): the guard core runs it at once
 -- for non-production accounts and asks for approval in Tern otherwise. When
--- the guard core is missing nothing runs. The pane first waits in the
--- project's auth ID's machine-wide CLI slot (cli_slot_host.luau): uploads
--- run as split panes, out of reach of any plugin VM, so a second upload, an
--- import or a browser listing for the same auth ID queues there and the
--- waiting pane says what it waits for.
+-- the guard core is missing nothing runs. The guard takes the project's
+-- auth ID's machine-wide CLI slot (cli_slot_host.luau) itself, after any
+-- approval and right before the CLI starts, so a second upload, an import
+-- or a browser listing for the same auth ID queues there and the waiting
+-- pane says what it waits for.
 
 local lazy = require("./lib/lazy")
 local CliSlot = lazy(function()

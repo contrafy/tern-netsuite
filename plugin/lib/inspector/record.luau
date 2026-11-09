@@ -36,7 +36,9 @@ export type Note = {
 	role: string?,
 	context: string?,
 	action: string?,
+	-- Field id (TRANDOC.KSTATUS) and its label (Document Status).
 	field: string?,
+	fieldLabel: string?,
 	old: string?,
 	new: string?,
 }
@@ -237,18 +239,26 @@ function M.named(refs: { Related }, names: { [string]: string }): { Related }
 	return out
 end
 
+-- `systemnote.type` is a static field BUILTIN.DF refuses; its values as
+-- the UI names them.
+local NOTE_TYPES: { [string]: string } = { ["1"] = "Create", ["2"] = "Set", ["3"] = "Delete", ["4"] = "Change" }
+
 function M.notes(rows: { any }?, null: any?): { Note }
 	local out: { Note } = {}
 	for i, r in (rows or {}) :: { any } do
 		local row = lowerKeys(r)
+		local action = M.text(row.action, null)
+		local field = M.text(row.field, null)
+		local fieldLabel = M.text(row.fieldlabel, null)
 		table.insert(out, {
 			id = M.text(row.id, null) or tostring(i),
 			noted = M.text(row.noted, null) or "",
 			who = M.text(row.who, null),
 			role = M.text(row.role, null),
 			context = M.text(row.context, null),
-			action = M.text(row.action, null),
-			field = M.text(row.field, null),
+			action = if action then NOTE_TYPES[action] or action else nil,
+			field = field,
+			fieldLabel = if fieldLabel ~= field then fieldLabel else nil,
 			old = M.text(row.oldvalue, null),
 			new = M.text(row.newvalue, null),
 		})

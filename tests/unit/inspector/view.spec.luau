@@ -144,6 +144,43 @@ describe("record inspector view", function()
 		expect(texts(View.view(s))).toContain("No connections are configured")
 	end)
 
+	it("shows a failed system notes read without a Loading line that never ends", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = State.update(s, {
+			t = "result",
+			req = first(effects, "record").req,
+			rows = json.decode(fixtures.read("inspector/salesorder-rest.json")),
+		})
+		s = State.update(
+			s,
+			{ t = "result", req = first(effects, "notes").req, err = Errors.new("query", "Search error") }
+		)
+		s = State.update(s, { t = "key", key = { name = "2", text = "2" } })
+		local out = texts(View.view(s))
+		expect(out).toContain("System notes could not be read")
+		expect((string.find(out, "Loading", 1, true))).toBeNil()
+	end)
+
+	it("labels a system note's field and names its type", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = State.update(s, {
+			t = "result",
+			req = first(effects, "record").req,
+			rows = json.decode(fixtures.read("inspector/salesorder-rest.json")),
+		})
+		s = State.update(s, {
+			t = "result",
+			req = first(effects, "notes").req,
+			rows = json.decode(fixtures.read("inspector/notes-restlet.json")),
+		})
+		s = State.update(s, { t = "key", key = { name = "2", text = "2" } })
+		local out = texts(View.view(s))
+		-- the dock shows the selected note's field with its label
+		expect(out).toContain("Document Status (TRANDOC.KSTATUS)")
+		expect(out).toContain("- Pending Approval\n+ Pending Fulfillment")
+		expect(out).toContain("Change")
+	end)
+
 	it("shows a standard field's label with its column and where the labels came from", function()
 		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
 		s, effects = State.update(s, {

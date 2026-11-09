@@ -10,11 +10,15 @@
 --                      table and numeric id (UI URL rectype, system notes)
 --   customfield        scriptid, name (the label), fieldvaluetyperecord (the
 --                      record type a list/record field points at)
---   systemnote         date, name (who), role, context, type (the action),
---                      field, oldvalue, newvalue, recordid, recordtypeid
+--   systemnote         date, name (who), role, context, type (the action:
+--                      a static 1..4 that BUILTIN.DF refuses, named in
+--                      record.luau), field (BUILTIN.DF gives its label),
+--                      oldvalue, newvalue, recordid, recordtypeid
 --   transactionline    transaction, linesequencenumber, mainline, item,
---                      quantity, netamount, memo
---   transaction        createdfrom / entity (records pointing back)
+--                      quantity, netamount, memo, createdfrom (the
+--                      transaction a line was created from; `transaction`
+--                      has no createdfrom column in SuiteQL)
+--   transaction        entity (records pointing back)
 
 local Catalog = require("./catalog")
 
@@ -128,7 +132,8 @@ function M.notes(id: string, types: { number }): Query?
 	return {
 		sql = "SELECT sn.id AS id, TO_CHAR(sn.date, 'YYYY-MM-DD HH24:MI:SS') AS noted,"
 			.. " BUILTIN.DF(sn.name) AS who, BUILTIN.DF(sn.role) AS role, BUILTIN.DF(sn.context) AS context,"
-			.. " BUILTIN.DF(sn.type) AS action, sn.field AS field, sn.oldvalue AS oldvalue, sn.newvalue AS newvalue"
+			.. " sn.type AS action, sn.field AS field, BUILTIN.DF(sn.field) AS fieldlabel,"
+			.. " sn.oldvalue AS oldvalue, sn.newvalue AS newvalue"
 			.. " FROM systemnote sn WHERE sn.recordid = ? AND sn.recordtypeid IN ("
 			.. string.rep("?, ", #types - 1)
 			.. "?) ORDER BY sn.date DESC, sn.id DESC",
@@ -149,11 +154,13 @@ function M.lines(id: string): Query
 	}
 end
 
--- Transactions created from this one (fulfillments, invoices, ...).
+-- Transactions created from this one (fulfillments, invoices, ...): their
+-- lines carry `createdfrom`.
 function M.children(id: string): Query
 	return {
-		sql = "SELECT t.id AS id, t.type AS type, t.tranid AS tranid, BUILTIN.DF(t.status) AS status"
-			.. " FROM transaction t WHERE t.createdfrom = ? ORDER BY t.id",
+		sql = "SELECT DISTINCT t.id AS id, t.type AS type, t.tranid AS tranid, BUILTIN.DF(t.status) AS status"
+			.. " FROM transaction t JOIN transactionline tl ON tl.transaction = t.id"
+			.. " WHERE tl.createdfrom = ? ORDER BY t.id",
 		params = { num(id) },
 		max_rows = M.MAX_CHILDREN,
 	}

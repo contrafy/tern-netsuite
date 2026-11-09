@@ -225,6 +225,14 @@ local function fieldRow(s: State, cur: State.Inspection, f: Record.Field, i: num
 	return ui.text(spans, { key = "f" .. i, actions = { click = "sel=" .. i } })
 end
 
+-- `Document Status (TRANDOC.KSTATUS)`, or the field id alone.
+local function noteField(n: Record.Note): string?
+	if n.field and n.fieldLabel then
+		return n.fieldLabel .. " (" .. n.field .. ")"
+	end
+	return n.field
+end
+
 local function noteRow(s: State, n: Record.Note, i: number, selected: boolean): Node
 	local cols = s.width or 120
 	local spans: { Span } = {
@@ -234,7 +242,7 @@ local function noteRow(s: State, n: Record.Note, i: number, selected: boolean): 
 		ui.span(pad(n.action or "", 7) .. " ", "accent"),
 	}
 	if n.field or n.old or n.new then
-		local change = (n.field or "?") .. ": " .. (n.old or "∅") .. " → " .. (n.new or "∅")
+		local change = (noteField(n) or "?") .. ": " .. (n.old or "∅") .. " → " .. (n.new or "∅")
 		table.insert(spans, ui.span(clip(change, math.max(cols - MARGIN - 50, 12))))
 	end
 	return ui.text(spans, { key = "n" .. i, actions = { click = "sel=" .. i } })
@@ -292,11 +300,16 @@ local function listNodes(s: State, cur: State.Inspection): { Node }
 		table.insert(out, ui.muted(cur.notice :: string, { key = "notice" }))
 	end
 	if n == 0 then
-		local empty = if tab == "fields"
+		local empty: string? = if tab == "fields"
 			then (if cur.fields then "No non-empty fields (e shows empty ones)." else "Loading…")
-			elseif tab == "notes" then (if cur.notes then "No system notes." else "Loading…")
+			elseif tab == "notes" then (if cur.notes
+				then "No system notes."
+				elseif cur.errs.notes then nil
+				else "Loading…")
 			else (if State.loading(s) then "Loading…" else "No related records found.")
-		table.insert(out, ui.muted(empty, { key = "empty" }))
+		if empty then
+			table.insert(out, ui.muted(empty, { key = "empty" }))
+		end
 		return out
 	end
 	local sel = State.selection(s, tab)
@@ -362,7 +375,7 @@ local function dock(s: State, cur: State.Inspection): Node?
 			end
 		end
 		table.insert(body, ui.text({ ui.span(table.concat(meta, " · "), "muted") }, { key = "dhead" }))
-		table.insert(body, ui.text({ ui.span(n.field or "(no field)", "strong") }, { key = "dfield" }))
+		table.insert(body, ui.text({ ui.span(noteField(n) or "(no field)", "strong") }, { key = "dfield" }))
 		table.insert(body, ui.code("- " .. (n.old or "") .. "\n+ " .. (n.new or ""), "diff", nil, { key = "dval" }))
 	else
 		return nil

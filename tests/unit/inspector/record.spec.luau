@@ -81,7 +81,7 @@ describe("inspected record", function()
 		expect(refs[2].record).toBe("employee")
 	end)
 
-	it("reads system notes with who, when and old -> new values", function()
+	it("reads system notes with who, when, the field's label and old -> new values", function()
 		local notes = Record.notes(json.decode(fixtures.read("inspector/notes-restlet.json")), null)
 		expect(notes[1]).toEqual({
 			id = "9002",
@@ -91,10 +91,23 @@ describe("inspected record", function()
 			context = "UI",
 			action = "Change",
 			field = "TRANDOC.KSTATUS",
+			fieldLabel = "Document Status",
 			old = "Pending Approval",
 			new = "Pending Fulfillment",
 		})
-		expect(notes[2].field).toBeNil()
+		expect(notes[2].action).toBe("Create")
+	end)
+
+	it("names the static system note types SuiteQL cannot display (BUILTIN.DF refuses sn.type)", function()
+		local function action(v: any): string?
+			return Record.notes({ { id = 1, noted = "x", action = v } }, null)[1].action
+		end
+		expect(action(1)).toBe("Create")
+		expect(action("2")).toBe("Set")
+		expect(action(3)).toBe("Delete")
+		expect(action(4)).toBe("Change")
+		expect(action(9)).toBe("9")
+		expect(action(null)).toBeNil()
 	end)
 
 	it("links each distinct line item once and labels linked transactions by type", function()

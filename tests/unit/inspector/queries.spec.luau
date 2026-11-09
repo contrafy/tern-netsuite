@@ -64,6 +64,21 @@ describe("inspector SuiteQL", function()
 		expect(Queries.notes("1", {})).toBeNil()
 	end)
 
+	it("reads the note type raw, since BUILTIN.DF fails on that static field, and the field's label", function()
+		local q = Queries.notes("123", { -30 }) :: Queries.Query
+		expect(q.sql).toContain("sn.type AS action")
+		expect((string.find(q.sql, "DF(sn.type)", 1, true))).toBeNil()
+		expect(q.sql).toContain("BUILTIN.DF(sn.field) AS fieldlabel")
+	end)
+
+	it("finds transactions created from a record through their lines, where createdfrom lives", function()
+		local q = Queries.children("123")
+		expect(q.sql).toContain("JOIN transactionline tl ON tl.transaction = t.id")
+		expect(q.sql).toContain("tl.createdfrom = ?")
+		expect(q.sql).toContain("SELECT DISTINCT")
+		expect(q.params).toEqual({ 123 })
+	end)
+
 	it("keeps the related-record queries read-only and parameterised", function()
 		readOnly(Queries.lines("123"))
 		readOnly(Queries.children("123"))

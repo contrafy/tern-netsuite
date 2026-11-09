@@ -14,6 +14,11 @@ function M.lock(authId: string?): string
 	return CliSlot.lockPath(tern.plugin.data, authId)
 end
 
+-- The directory of every auth ID's slot (TNS_CLI_SLOTS for the guard).
+function M.dir(): string
+	return CliSlot.slotsDir(tern.plugin.data)
+end
+
 -- `argv` (an account command for `authId`) as a background run that waits
 -- for the slot within half of `timeoutMs`.
 function M.wrap(argv: { string }, authId: string?, timeoutMs: number): { string }

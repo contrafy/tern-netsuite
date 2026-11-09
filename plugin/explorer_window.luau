@@ -114,7 +114,7 @@ local function launch(cx: WindowCx, pane: number?, owner: Owner, target: Target)
 		cx:toast("error", "Tern NetSuite: upload refused", owner.root .. "/" .. owner.path .. " is gone; rescan")
 		return
 	end
-	local l, err = Upload().command(owner, guard, target, CliSlotHost().lock(target.authId))
+	local l, err = Upload().command(owner, guard, target, CliSlotHost().dir())
 	if l == nil then
 		cx:toast("error", "Tern NetSuite: upload refused", err)
 		return

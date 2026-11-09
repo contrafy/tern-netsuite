@@ -25,7 +25,8 @@ None found: exit 127.
 The command is the first argument that does not start with `-` (the CLI's
 global options take no value). It is guarded when it is listed in
 `$TNS_GUARD_COMMANDS` (space-separated; unset = `project:deploy file:upload`,
-empty = nothing). Not guarded, executed at once with `exec`:
+empty = nothing). Not guarded, executed at once (after the CLI slot, see
+below, for account commands):
 
 - every other command;
 - `-h`/`--help` anywhere (before `--`, and not right after an option that
@@ -35,6 +36,47 @@ empty = nothing). Not guarded, executed at once with `exec`:
   none of `beforeExecuting`, `require(`, `import ` / `import(` (a hook,
   possibly loaded from other code, can rewrite the arguments into a real
   deploy). `--log --dryrun` and `-- --dryrun` are not previews.
+
+## CLI slot
+
+Two SuiteCloud account commands running at once for one auth ID race on
+its OAuth token refresh and can void the stored credentials. The plugin
+runs every account command it starts in the auth ID's slot
+(`plugin/lib/sdf/cli_slot.luau`); the guard takes the same slot for the
+commands typed in a shell, so the two never overlap.
+
+- Applies when `$TNS_CLI_SLOTS` is set (absolute path, else refused) and
+  the command is an account command (`isSetupRequired` in CLI 3.2.0):
+  `project:deploy`, `project:validate`, `file:import`, `object:import`,
+  `file:list`, `object:list`, `object:update`, `file:upload`, guarded or
+  not, interactive (`-i`) included: an interactive command still talks to
+  the account. `--help`, `--version`, `account:manageauth` and every other
+  command pass straight through. Without `TNS_CLI_SLOTS` (outside Tern, a
+  pane opened before the plugin loaded, `command suitecloud`) nothing is
+  locked.
+- Lock: `$TNS_CLI_SLOTS/<name>`, a directory (`mkdir` is atomic); `<name>`
+  is `auth-<auth ID>` for an id of at most 64 characters matching
+  `[A-Za-z0-9_][A-Za-z0-9_.-]*`, `hex-<lowercase hex bytes>` for any other
+  id, and `none` when the guard reads no auth ID (no `project.json`, no
+  `defaultAuthId`, or one it cannot read unambiguously, see below; then it
+  prints a warning, since the CLI may use an auth ID the slot does not
+  cover).
+- `<lock>/owner`: `pid|ps lstart|command|cwd` of the process that holds it.
+  The guard waits until it can create the lock (printing once `waiting for
+  <command> (pid <pid>, in <dir>) to finish`), writes itself as the owner
+  and then `exec`s the CLI, so the owner is the CLI process; nothing
+  releases the lock on success. The next taker removes a lock whose owner
+  is gone (dead, a zombie, or its pid reused with another start time) or
+  that has had no owner file for 5 s, serialized by `<lock>.reap`. A
+  process that already owns the lock (a plugin slot script that execs the
+  PATH shim) keeps it.
+- The waiting code is `CliSlot.ACQUIRE`, embedded verbatim in the guard
+  (`tng_slot_acquire`; `tests/shell/cli-slot/run.sh` checks the copy).
+- Guarded commands take the slot only after a verified approval (or at once
+  for a non-production target or with `TNS_GUARD_CONFIRM=0`): a pending
+  approval never holds back other commands for the auth ID. Ctrl-C while
+  waiting exits 130 with nothing executed; a refusal after the slot was
+  taken removes the lock again.
 
 ## Target resolution
 
@@ -90,6 +132,7 @@ hook from the user's config:
 | `TNS_GUARD_TIMEOUT` | `guard.timeout_s` |
 | `TNS_GUARD_ACCOUNTS` | `ACCOUNT_ID=prod\|nonprod` for each `accounts[]` entry with an explicit `production` |
 | `TNS_SUITECLOUD` | `suitecloud.program` when it is an absolute path |
+| `TNS_CLI_SLOTS` | `<plugin data>/cli-slots`, the CLI slot directory |
 
 A config change reaches panes opened after it. Without these variables
 (outside Tern, or an old pane) the guard uses its defaults, which never
@@ -246,11 +289,12 @@ The guard refuses, executing nothing, unless all hold:
    list enumerated and hashed again) equals both the request and the
    response `fingerprint`.
 
-Then the guard removes its request, response and scratch files, restores
-the user's umask and runs `exec <program> "$@"`: the exact argv, the user's
-terminal, environment and working directory, the CLI's exit status. Exit
-statuses of the guard itself: 1 refusal or denial, 130 cancelled, 127 no
-CLI, 2 usage.
+Before checks 7 and 8 the guard takes the CLI slot when it applies (see
+"CLI slot"); the checks run once it is held. Then the guard removes its
+request, response and scratch files, restores the user's umask and runs
+`exec <program> "$@"`: the exact argv, the user's terminal, environment and
+working directory, the CLI's exit status. Exit statuses of the guard
+itself: 1 refusal or denial, 130 cancelled, 127 no CLI, 2 usage.
 
 ## Audit log
 

@@ -94,6 +94,15 @@ describe("the slot of an auth ID", function()
 		expect(CliSlot.lockPath(DATA, nil)).toBe(DATA .. "/cli-slots/none")
 	end)
 
+	it("keeps every lock in the one directory the guard is told about, so shells and the plugin share them", function()
+		local dir = CliSlot.slotsDir(DATA)
+		for _, id in { "demo-sb", "../../x", "" } do
+			local p = CliSlot.lockPath(DATA, id)
+			expect(string.sub(p, 1, #dir + 1)).toBe(dir .. "/")
+			expect((string.find(string.sub(p, #dir + 2), "/", 1, true))).toBeNil()
+		end
+	end)
+
 	it("knows which CLI commands talk to the account and so need the slot", function()
 		expect(CliSlot.isAccountCommand("object:list")).toBe(true)
 		expect(CliSlot.isAccountCommand("file:upload")).toBe(true)
@@ -218,6 +227,17 @@ describe("a pane in the slot", function()
 			expect((CliSlot.paneScript(pane({ lock = bad })))).toBeNil()
 			expect((CliSlot.paneScript(pane({ argv = { "suitecloud", "file:import", "--paths", bad } })))).toBeNil()
 		end
+	end)
+
+	it("lets a command that takes the slot itself (the guard, after approval) run without waiting first", function()
+		local p = pane()
+		p.lock = nil
+		local script = CliSlot.paneScript(p) :: string
+		expect((string.find(script, CliSlot.NAME, 1, true))).toBeNil()
+		expect(script).toContain(
+			"cd /work/acme/billing && /opt/tern-netsuite/shell/tern-netsuite-guard suitecloud file:upload"
+		)
+		expect(script).toContain([[%s exited %s; press Enter to close\n' file:upload "$s"]])
 	end)
 end)
 

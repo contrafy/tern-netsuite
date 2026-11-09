@@ -5,13 +5,17 @@
 -- already validated here, and an absent variable means the guard's
 -- fail-closed defaults.
 
+local CliSlot = require("../sdf/cli_slot")
 local Config = require("../config")
 
 type Config = Config.Config
 
 local M = {}
 
-function M.forSpawn(cfg: Config, spool: string): { [string]: string }
+-- `slots` is the CLI slot directory (CliSlot.slotsDir): the guard takes the
+-- auth ID's lock there for every SuiteCloud account command typed in the
+-- pane, so it never overlaps the plugin's own CLI runs.
+function M.forSpawn(cfg: Config, spool: string, slots: string): { [string]: string }
 	local accounts: { string } = {}
 	for _, a in cfg.accounts do
 		-- The shell splits the list on spaces and the entries on "=".
@@ -29,6 +33,9 @@ function M.forSpawn(cfg: Config, spool: string): { [string]: string }
 	local program = cfg.suitecloud.program
 	if string.sub(program, 1, 1) == "/" and not string.find(program, "%s") then
 		env.TNS_SUITECLOUD = program
+	end
+	if string.sub(slots, 1, 1) == "/" then
+		env[CliSlot.ENV] = slots
 	end
 	return env
 end

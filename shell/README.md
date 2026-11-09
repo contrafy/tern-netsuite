@@ -101,6 +101,35 @@ A production target is refused outside a Tern pane (any terminal without
 the message names the target account and the deliberate bypass.
 Non-production targets and non-guarded commands work everywhere.
 
+## One account command per auth ID
+
+Two SuiteCloud account commands running at once for the same auth ID can
+void its stored credentials (you then log in again with
+`suitecloud account:setup`). The plugin therefore runs its own CLI calls
+(browser listings, imports, uploads) one at a time per auth ID, and the
+guard makes the commands you type wait for the same per-auth-ID slot:
+
+- every account command waits, guarded or not: `project:deploy`,
+  `project:validate`, `file:import`, `object:import`, `file:list`,
+  `object:list`, `object:update`, `file:upload`, interactive `-i` runs
+  included (they still talk to the account);
+- `--help`, `--version`, `account:manageauth` and all other commands run at
+  once;
+- while it waits, the command prints what holds the slot, for example
+  `tern-netsuite: waiting for object:list (pid 4242, in /work/acme/billing)
+  to finish`; Ctrl-C cancels it and nothing runs;
+- a production command asks for approval first and waits for the slot only
+  once approved, so a pending approval never holds back the plugin;
+- the auth ID is `project.json`'s `defaultAuthId` in the current directory.
+  A `project.json` the guard cannot read unambiguously uses the slot shared
+  by projects without an auth ID, with a warning.
+
+The slot directory reaches new Tern panes as `TNS_CLI_SLOTS` (set by the
+plugin). Outside Tern, in panes opened before the plugin loaded, and with
+`command suitecloud`, nothing waits: avoid running two account commands
+for one auth ID there. `tern-netsuite-guard-status` shows the slot of the
+current directory and what holds it.
+
 ## Settings
 
 From the plugin config (`$XDG_CONFIG_HOME/tern-netsuite/config.json`),
@@ -117,7 +146,8 @@ handed to new panes as environment variables by the plugin:
 - `suitecloud.program`: when an absolute path, the CLI the guard runs.
 
 Shell-only: `TERN_BIN` (the `tern` to call), `TNS_SUITECLOUD` (absolute
-path of the real CLI).
+path of the real CLI). `TNS_CLI_SLOTS` (the CLI slot directory) comes from
+the plugin, not from the config.
 
 ## Status
 
@@ -126,8 +156,9 @@ tern-netsuite-guard-status
 ```
 
 prints the mode, which `suitecloud` is active, the real CLI and `tern` the
-guard will use, the guarded commands, the timeout, and what a guarded
-command aimed at production would do in this shell.
+guard will use, the guarded commands, the timeout, what a guarded command
+aimed at production would do in this shell, and the CLI slot of the
+current directory.
 
 ## Bypass
 
@@ -138,7 +169,8 @@ command suitecloud project:deploy
 ```
 
 Shim mode: call the real CLI by its path (refusals print it). A bypassed
-command gets no confirmation and no audit entry.
+command gets no confirmation and no audit entry, and does not wait for the
+CLI slot.
 
 ## Conflicts
 
@@ -174,5 +206,6 @@ the alias still wins for commands typed in that shell).
 
 `make test-shell` runs `tests/shell/guard/run.sh` in zsh, bash, fish and
 dash (each when installed) with a fake `tern` and a fake `suitecloud`
-(`tests/bin/fake-suitecloud-guard`); no Tern and no NetSuite account is
-involved.
+(`tests/bin/fake-suitecloud-guard`, plus `tests/shell/guard/bin/slot-cli`
+for the CLI slot cases), and `tests/shell/cli-slot/run.sh` for the slot
+itself; no Tern and no NetSuite account is involved.

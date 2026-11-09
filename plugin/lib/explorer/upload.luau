@@ -6,10 +6,12 @@
 -- production or unknown ones, failing closed. The account resolved here only
 -- labels the pane; the guard resolves it again itself.
 --
--- The pane waits in the auth ID's machine-wide CLI slot
--- (lib/sdf/cli_slot.luau) before the guard starts, so a second upload or a
--- browser listing for the same auth ID never runs beside it; the pane says
--- what it waits for. The slot is held through the guard's approval.
+-- The guard takes the auth ID's machine-wide CLI slot (lib/sdf/cli_slot.luau)
+-- itself, after the approval and right before it execs the CLI, so a second
+-- upload or a browser listing for the same auth ID never runs beside it and
+-- an approval that is pending never blocks them. The pane hands the guard
+-- the slot directory in TNS_CLI_SLOTS explicitly instead of relying on the
+-- spawn hook's environment reaching the split.
 --
 -- The SuiteCloud CLI reads project.json from its working directory only and
 -- `file:upload` has no --authid or --project option (CLI 3.2.0), so the pane
@@ -101,14 +103,17 @@ local function badPath(path: string, what: string): string?
 	return nil
 end
 
--- The upload pane of `owner`'s file, waiting in the CLI slot `lock` (see
--- CliSlotHost.lock) of the project's auth ID.
-function M.command(owner: Owner, guard: string, target: Target, lock: string): (Launch?, string?)
+-- The upload pane of `owner`'s file; the guard waits in the CLI slot of
+-- the project's auth ID under `slots` (see CliSlotHost.dir).
+function M.command(owner: Owner, guard: string, target: Target, slots: string): (Launch?, string?)
 	local fc = owner.fileCabinetPath
 	if fc == nil then
 		return nil, owner.path .. " is not a File Cabinet file"
 	end
-	local why = badPath(owner.root, "project root") or badPath(guard, "guard path") or badPath(fc, "File Cabinet path")
+	local why = badPath(owner.root, "project root")
+		or badPath(guard, "guard path")
+		or badPath(fc, "File Cabinet path")
+		or badPath(slots, "CLI slot directory")
 	if why then
 		return nil, why
 	end
@@ -127,8 +132,8 @@ function M.command(owner: Owner, guard: string, target: Target, lock: string): (
 		title = title,
 		intro = string.format("uploading %s from %s to %s", fc, owner.project, target.label),
 		cwd = owner.root,
-		lock = lock,
-		argv = argv,
+		lock = nil,
+		argv = { "env", CliSlot.ENV .. "=" .. slots, table.unpack(argv) },
 	})
 	if script == nil then
 		return nil, (err or "") .. "; upload it from a terminal"

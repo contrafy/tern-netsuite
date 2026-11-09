@@ -1,12 +1,15 @@
 #!/bin/sh
 # tern-netsuite-guard: approval gate for SuiteCloud CLI commands that write to
-# a production NetSuite account, for Tern panes.
+# a production NetSuite account, for Tern panes, and the shell side of the
+# plugin's per-auth-ID SuiteCloud CLI slot.
 #
 #   tern-netsuite-guard suitecloud [ARGS...]   run suitecloud; a guarded command
 #                                              (project:deploy, file:upload by
 #                                              default) aimed at a production or
 #                                              unknown account waits for approval
-#                                              in Tern first
+#                                              in Tern first; every account
+#                                              command waits for its auth ID's
+#                                              CLI slot ($TNS_CLI_SLOTS) last
 #   tern-netsuite-guard shim [ARGS...]         the same, called by the PATH shim
 #                                              shell/bin/suitecloud
 #   tern-netsuite-guard status                 print what the guard would do here
@@ -18,6 +21,14 @@
 
 tng_shim_marker=TERN_NETSUITE_GUARD_SHIM
 tng_default_commands='project:deploy file:upload'
+# The CLI's account commands (isSetupRequired in CLI 3.2.0), as
+# plugin/lib/sdf/cli_slot.luau ACCOUNT_COMMANDS.
+tng_account_commands='project:deploy project:validate file:import object:import file:list object:list object:update file:upload'
+# Takes the slot $lock, waiting $wait seconds (0: until it frees), as
+# $label. A verbatim copy of plugin/lib/sdf/cli_slot.luau ACQUIRE
+# (tests/shell/cli-slot/run.sh checks it): the plugin's own CLI runs take
+# the same lock directories the same way.
+tng_slot_acquire='mkdir -p "${lock%/*}" 2>/dev/null; me=$(ps -o lstart= -p "$$" 2>/dev/null); held() { pid= start= what= dir=; IFS="|" read -r pid start what dir 2>/dev/null <"$lock/owner"; [ -n "$pid" ]; }; gone() { ! kill -0 "$pid" 2>/dev/null || [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" != "$start" ] || case $(ps -o stat= -p "$pid" 2>/dev/null) in *Z*) true ;; *) false ;; esac; }; reap() { if mkdir "$lock.reap" 2>/dev/null; then if held; then gone && rm -rf "$lock"; elif [ "$missing" -ge 5 ]; then rm -rf "$lock"; fi; rmdir "$lock.reap"; elif [ -n "$(find "$lock.reap" -prune -mmin +1 2>/dev/null)" ]; then rmdir "$lock.reap" 2>/dev/null; fi; }; n=0 missing=0 told=; if held && [ "$pid" = "$$" ] && [ -n "$me" ] && [ "$start" = "$me" ]; then :; else until mkdir "$lock" 2>/dev/null; do if held; then missing=0; else missing=$((missing + 1)); fi; if { [ -n "$pid" ] && gone; } || [ "$missing" -ge 5 ]; then reap; mkdir "$lock" 2>/dev/null && break; fi; if [ "$wait" -eq 0 ] && [ -z "$told" ] && [ -n "$pid" ]; then printf "tern-netsuite: waiting for %s (pid %s, in %s) to finish: one SuiteCloud account command at a time per auth ID" "$what" "$pid" "$dir" >&2; echo >&2; told=1; fi; n=$((n + 1)); if [ "$wait" -gt 0 ] && [ "$n" -ge "$wait" ]; then printf "tern-netsuite: %s (pid %s) still holds this auth ID after %s s; nothing was run, try again when it finishes" "${what:-another SuiteCloud command}" "${pid:-?}" "$wait" >&2; echo >&2; exit 75; fi; sleep 1; done; printf "%s|%s|%s|%s" "$$" "$me" "$label" "$PWD" >"$lock/owner"; fi'
 
 tng_err() {
 	printf 'tern-netsuite guard: %s\n' "$*" >&2
@@ -42,6 +53,7 @@ tng_bypass_hint() {
 tng_refuse() {
 	tng_err "$@"
 	tng_bypass_hint
+	tng_slot_release
 	tng_cleanup
 	exit 1
 }
@@ -187,13 +199,17 @@ tng_read_auth() {
 
 # The project the CLI will use: exactly the working directory (the CLI reads
 # project.json and suitecloud.config.js from there, never from a parent).
-tng_project() {
+tng_project_auth() {
 	tng_cwd=$(pwd -P) || tng_refuse "cannot determine the working directory."
 	tng_auth=
 	tng_auth_issue=
 	if [ -f "$tng_cwd/project.json" ]; then
 		tng_read_auth "$tng_cwd/project.json"
 	fi
+}
+
+tng_project() {
+	tng_project_auth
 	tng_pf=
 	if [ -f "$tng_cwd/suitecloud.config.js" ]; then
 		tng_pf=$(sed -n "s/.*defaultProjectFolder[[:space:]]*:[[:space:]]*[\"'\`]\\([^\"'\`]*\\)[\"'\`].*/\\1/p" "$tng_cwd/suitecloud.config.js" | sed -n 1p)
@@ -210,6 +226,82 @@ tng_project() {
 	/*) tng_folder=$tng_pf ;;
 	*) tng_folder=$tng_cwd/$tng_pf ;;
 	esac
+}
+
+# The SuiteCloud CLI slot (plugin/lib/sdf/cli_slot.luau): two account
+# commands for one auth ID at once can void its stored credentials, so each
+# account command waits for the auth ID's lock directory under
+# $TNS_CLI_SLOTS (set by the plugin's spawn hook) and execs the CLI as the
+# lock's owner. Without TNS_CLI_SLOTS (outside Tern, an old pane) nothing is
+# locked. Sets tng_slots to the slot directory when this command needs it.
+tng_slot_wanted() {
+	tng_slots=
+	[ -n "${TNS_CLI_SLOTS-}" ] && [ -n "$tng_cmd" ] || return 0
+	case " $tng_account_commands " in
+	*" $tng_cmd "*) ;;
+	*) return 0 ;;
+	esac
+	case $TNS_CLI_SLOTS in
+	/*) ;;
+	*) tng_refuse "TNS_CLI_SLOTS must be an absolute path: $TNS_CLI_SLOTS" ;;
+	esac
+	tng_slots=$TNS_CLI_SLOTS
+}
+
+# tng_lock = the lock directory of tng_auth, named as CliSlot.lockPath names
+# it: auth-<id> for a plain id, hex-<bytes> otherwise, none without one.
+tng_lock_path() {
+	tng_lock=
+	if [ -z "$tng_auth" ]; then
+		tng_lock=$tng_slots/none
+		return 0
+	fi
+	case $tng_auth in
+	[!A-Za-z0-9_]* | *[!A-Za-z0-9_.-]*) ;;
+	*) [ ${#tng_auth} -le 64 ] && tng_lock=$tng_slots/auth-$tng_auth ;;
+	esac
+	[ -n "$tng_lock" ] || tng_lock=$tng_slots/hex-$(printf '%s' "$tng_auth" | od -An -v -tx1 | tr -d ' \n')
+}
+
+# Waits for the slot of tng_auth (the slot shared by projects without a
+# readable auth ID when it is unknown) and records this process, which then
+# execs the CLI, as its owner.
+tng_slot_take() {
+	tng_lock_path
+	[ -z "$tng_auth_issue" ] ||
+		tng_err "project.json $tng_auth_issue: $tng_cmd waits in the shared slot of projects without a readable auth ID, so it may overlap another command for the auth ID the CLI uses."
+	lock=$tng_lock wait=0 label=$tng_cmd
+	eval "$tng_slot_acquire"
+	tng_slot_held=1
+}
+
+# Gives the slot back when this process will not exec the CLI after all.
+tng_slot_release() {
+	[ -n "${tng_slot_held-}" ] || return 0
+	tng_slot_held=
+	tng_o=
+	IFS='|' read -r tng_o tng_rest <"$tng_lock/owner" 2>/dev/null
+	[ "$tng_o" = "$$" ] && rm -rf "$tng_lock"
+	return 0
+}
+
+tng_slot_on_signal() {
+	trap '' INT TERM HUP
+	tng_slot_release
+	tng_cleanup
+	tng_err "cancelled while waiting for the SuiteCloud CLI slot; nothing was executed."
+	exit 130
+}
+
+# Runs the CLI with "$@", in its auth ID's slot when it needs one.
+tng_run() {
+	if [ -n "$tng_slots" ]; then
+		[ -n "${tng_cwd-}" ] || tng_project_auth
+		trap tng_slot_on_signal INT TERM HUP
+		tng_slot_take
+		trap - INT TERM HUP
+	fi
+	exec "$tng_program" "$@"
 }
 
 # Notes about the project that the approver should see.
@@ -617,6 +709,7 @@ tng_on_signal() {
 	trap '' INT TERM HUP
 	tng_stop_waiting
 	tng_mark_cancel
+	tng_slot_release
 	tng_cleanup
 	tng_err "cancelled; nothing was executed."
 	exit 130
@@ -645,6 +738,21 @@ tng_status() {
 	else
 		printf 'this shell: Tern pane %s; guarded commands aimed at production ask for approval (spool %s)\n' "$TERN_PANE" "$TNS_SPOOL"
 	fi
+	case ${TNS_CLI_SLOTS-} in
+	'') printf 'CLI slot: off (TNS_CLI_SLOTS is not set: outside Tern or a pane opened before the plugin loaded); account commands typed here are not kept apart from the plugin'\''s CLI runs\n' ;;
+	/*)
+		tng_slots=$TNS_CLI_SLOTS
+		tng_project_auth
+		tng_lock_path
+		printf 'CLI slot: account commands typed here wait in %s\n' "$tng_lock"
+		tng_o=
+		IFS='|' read -r tng_o tng_ostart tng_owhat tng_odir <"$tng_lock/owner" 2>/dev/null
+		if [ -n "$tng_o" ] && kill -0 "$tng_o" 2>/dev/null; then
+			printf 'CLI slot: held by %s (pid %s, in %s)\n' "$tng_owhat" "$tng_o" "$tng_odir"
+		fi
+		;;
+	*) printf 'CLI slot: TNS_CLI_SLOTS is not an absolute path (%s); account commands are refused\n' "$TNS_CLI_SLOTS" ;;
+	esac
 }
 
 tng_guard() {
@@ -655,12 +763,12 @@ tng_guard() {
 	tng_resolve_account
 	tng_classify
 	if [ "$tng_prod" = 0 ]; then
-		exec "$tng_program" "$@"
+		tng_run "$@"
 	fi
 	tng_target_label
 	if [ "${TNS_GUARD_CONFIRM-1}" = 0 ]; then
 		tng_err "guard.confirm_production is false: running $tng_cmd against $tng_label without approval."
-		exec "$tng_program" "$@"
+		tng_run "$@"
 	fi
 
 	[ "${TERM_PROGRAM-}" = tern ] && [ -n "${TERN_PANE-}" ] ||
@@ -783,6 +891,14 @@ tng_guard() {
 	[ "$tng_r_account" = "${tng_acct:--}" ] ||
 		tng_refuse "the approval was for account '$tng_r_account', not '${tng_acct:--}' (account mismatch)."
 
+	# The slot is taken only now: a pending approval never holds back the
+	# plugin's listings or other commands for this auth ID. The checks below
+	# run once it is held, right before the CLI starts.
+	if [ -n "$tng_slots" ]; then
+		trap tng_slot_on_signal INT TERM HUP
+		tng_slot_take
+	fi
+
 	tng_notes=
 	tng_project
 	[ "$tng_auth" = "$tng_req_auth" ] ||
@@ -803,18 +919,19 @@ tng_main() {
 		exit 127
 	}
 	tng_scan "$@"
-	tng_is_guarded || exec "$tng_program" "$@"
 	[ -n "$tng_help" ] && exec "$tng_program" "$@"
+	tng_slot_wanted
+	tng_is_guarded || tng_run "$@"
 	# A deploy preview changes nothing in the account, unless a
 	# beforeExecuting hook (run by the CLI first) rewrites the arguments. A
 	# config that loads other code may get one from there, and an unreadable
 	# config may hold one: neither takes the shortcut.
 	if [ "$tng_cmd" = project:deploy ] && [ -n "$tng_dry" ]; then
 		if [ ! -e suitecloud.config.js ]; then
-			exec "$tng_program" "$@"
+			tng_run "$@"
 		fi
 		grep -Eq 'beforeExecuting|require[[:space:]]*\(|import[[:space:](]' suitecloud.config.js 2>/dev/null
-		[ $? = 1 ] && exec "$tng_program" "$@"
+		[ $? = 1 ] && tng_run "$@"
 	fi
 	tng_guard "$@"
 }

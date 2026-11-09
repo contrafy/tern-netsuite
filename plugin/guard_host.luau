@@ -5,6 +5,7 @@
 -- effects of lib/guard/session.luau and feeds results, keys, events and
 -- liveness ticks back as messages; all decisions live in the session.
 
+local CliSlotHost = require("./cli_slot_host")
 local ConfigHost = require("./config_host")
 local Env = require("./lib/guard/env")
 local Protocol = require("./lib/guard/protocol")
@@ -205,7 +206,7 @@ function M.register()
 	pcall(tern.fs.mkdir, M.SPOOL)
 
 	tern.on("spawn", function(spec: SpawnSpec): SpawnSpec?
-		for k, v in Env.forSpawn(ConfigHost.current(), M.SPOOL) do
+		for k, v in Env.forSpawn(ConfigHost.current(), M.SPOOL, CliSlotHost.dir()) do
 			spec.env[k] = v
 		end
 		return spec

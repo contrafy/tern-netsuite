@@ -7,7 +7,9 @@
 # reachable: PATH holds only the fakes, the shells under test and the system
 # directories. Each case asserts the property the guard exists for: a
 # guarded command aimed at production runs only after a matching approval,
-# exactly as typed; everything else is untouched.
+# exactly as typed; everything else is untouched; and every account command
+# waits for its auth ID's CLI slot, which the plugin's own runs share
+# (plugin/lib/sdf/cli_slot.luau), so the two never overlap.
 #
 #   sh tests/shell/guard/run.sh      (or: make test-shell)
 
@@ -51,7 +53,7 @@ HOME=$root/home
 XDG_CONFIG_HOME=$root/home/.config
 export PATH HOME XDG_CONFIG_HOME
 unset TERN_BIN TNS_SPOOL TNS_GUARD_COMMANDS TNS_GUARD_CONFIRM TNS_GUARD_TIMEOUT TNS_GUARD_ACCOUNTS TNS_SUITECLOUD \
-	TERN_NETSUITE_GUARD ZDOTDIR FAKE_READ_STDIN BASH_ENV ENV PROMPT_COMMAND GIT_DIR GIT_WORK_TREE
+	TNS_CLI_SLOTS TERN_NETSUITE_GUARD ZDOTDIR FAKE_READ_STDIN BASH_ENV ENV PROMPT_COMMAND GIT_DIR GIT_WORK_TREE
 FAKE_DIR=$root/fake
 export FAKE_DIR
 
@@ -84,7 +86,7 @@ P=$root/work/sdf/billing
 # are symlinks into a shared directory.
 fresh() {
 	case_name=$1
-	rm -rf "$FAKE_DIR" "$root/spool" "$root/work"
+	rm -rf "$FAKE_DIR" "$root/spool" "$root/work" "$root/slots"
 	mkdir -p "$FAKE_DIR" "$P/src/Objects" "$P/src/FileCabinet/SuiteScripts/my dir" "$root/work/shared"
 	printf '1234567\nProduction\nExample Co\n' >"$FAKE_DIR/auth-prod"
 	printf '1234567_SB1\nSandbox\nExample Co\n' >"$FAKE_DIR/auth-sandbox"
@@ -120,7 +122,7 @@ EOF
 	TNS_SPOOL=$root/spool
 	export TERM_PROGRAM TERN_PANE TNS_SPOOL
 	unset TNS_GUARD_COMMANDS TNS_GUARD_CONFIRM TNS_GUARD_TIMEOUT TNS_GUARD_ACCOUNTS TNS_SUITECLOUD TERN_BIN \
-		FAKE_READ_STDIN TERN_NETSUITE_GUARD
+		FAKE_READ_STDIN TERN_NETSUITE_GUARD TNS_CLI_SLOTS
 	PATH=$BASE_PATH
 	cd "$P" || exit 2
 	: >"$root/out"
@@ -131,7 +133,8 @@ mode() {
 }
 
 # run_code SHELL CODE ARGS...: runs CODE in SHELL (no rc files) with ARGS as
-# its positional arguments ($argv in fish); output in $root/out, status in $st.
+# its positional arguments ($argv in fish); output in ${OUT_FILE:-$root/out},
+# status in $st.
 run_code() {
 	sh_=$1
 	code_=$2
@@ -141,7 +144,7 @@ run_code() {
 	bash) bash --norc --noprofile -c "$code_" bash "$@" ;;
 	fish) fish --no-config -c "$code_" -- "$@" ;;
 	dash) dash -c "$code_" dash "$@" ;;
-	esac >"$root/out" 2>&1 <"${STDIN_FILE:-/dev/null}"
+	esac >"${OUT_FILE:-$root/out}" 2>&1 <"${STDIN_FILE:-/dev/null}"
 	st=$?
 }
 
@@ -612,6 +615,255 @@ core_cases() {
 	else ok; fi
 }
 
+# The SuiteCloud CLI slot. A "plugin run" is what the plugin starts:
+# plugin/lib/sdf/cli_slot.luau's SCRIPT around a command; the typed command
+# goes through the guard with TNS_CLI_SLOTS set as the spawn hook sets it.
+# Holders append start-p/end-p and the fake CLI (tests/shell/guard/bin/
+# slot-cli) start-u/end-u to $FAKE_DIR/order.
+slot_script=
+if [ -x "$luau" ]; then
+	slot_script=$(cd "$repo/tests/shell/cli-slot" && "$luau" slot.luau -a script)
+fi
+
+slot_env() {
+	TNS_CLI_SLOTS=$root/slots
+	TNS_SUITECLOUD=$here/bin/slot-cli
+	export TNS_CLI_SLOTS TNS_SUITECLOUD
+}
+
+# poll SECONDS CMD...: until CMD succeeds, at most SECONDS.
+poll() {
+	n_=$(($1 * 10))
+	shift
+	while [ "$n_" -gt 0 ]; do
+		"$@" && return 0
+		sleep 0.1
+		n_=$((n_ - 1))
+	done
+	return 1
+}
+
+# plugin_hold LOCK BODY: a plugin run holding LOCK while the sh code BODY
+# runs ($1 = the order file, $2 = $FAKE_DIR); returns once it holds it.
+plugin_hold() {
+	sh -c "$slot_script" tern-netsuite-cli "$1" 30 object:list sh -c "$2" x "$FAKE_DIR/order" "$FAKE_DIR" 2>"$root/holder-err" &
+	holder=$!
+	holders="$holders $holder"
+	poll 5 test -s "$1/owner" || bad "the plugin run never took $1"
+}
+
+release_holders() {
+	for h_ in $holders; do
+		kill "$h_" 2>/dev/null
+		wait "$h_" 2>/dev/null
+	done
+	holders=
+}
+
+order() {
+	tr '\n' ' ' <"$FAKE_DIR/order" 2>/dev/null
+}
+
+expect_order() {
+	if [ "$(order)" = "$1" ]; then ok; else bad "$2: order '$(order)', want '$1'"; fi
+}
+
+# The plugin run started by plugin_hold still holds LOCK.
+expect_holder_owns() {
+	IFS='|' read -r o_ _ <"$1/owner" 2>/dev/null
+	if [ "$o_" = "$holder" ]; then ok; else bad "$2: the slot's owner is '$o_', not the plugin run $holder"; fi
+}
+
+HOLD='echo start-p >>"$1"; sleep 1; echo end-p >>"$1"'
+
+slot_cases() {
+	sh=$1
+	if [ -z "$slot_script" ]; then
+		case_name="$sh CLI slot"
+		skip "the slot cases need $luau (make bootstrap)"
+		return
+	fi
+	holders=
+
+	fresh "$sh a typed account command waits while a plugin run holds its auth ID's slot"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" "$HOLD"
+	run_s "$sh" object:list --type customscript
+	expect_status 0 "typed object:list"
+	expect_order "start-p end-p start-u end-u " "typed object:list after the plugin run"
+	expect_out "waiting for object:list \\(pid $holder, in " "the typed command says what it waits for"
+	expect_ran "typed object:list" object:list --type customscript
+	expect_no_tern "object:list needs no approval"
+	release_holders
+
+	fresh "$sh a plugin run waits while a typed account command holds the slot"
+	slot_env
+	echo 1 >"$FAKE_DIR/hold"
+	(
+		OUT_FILE=$root/bg-out run_s "$sh" file:list --folder /SuiteScripts
+		echo "$st" >"$root/bg-st"
+	) &
+	bg=$!
+	poll 5 test -s "$root/slots/auth-prod/owner" || bad "the typed command never took the slot"
+	# A plugin pane (an import) waits as long as it takes and says why.
+	sh -c "$slot_script" tern-netsuite-cli "$root/slots/auth-prod" 0 object:import sh -c 'echo start-p >>"$1"' x "$FAKE_DIR/order" 2>"$root/holder-err"
+	wait "$bg"
+	expect_order "start-u end-u start-p " "plugin run after the typed file:list"
+	if grep -q "waiting for file:list (pid $(cat "$FAKE_DIR/slot-pid"), in $P)" "$root/holder-err"; then ok; else bad "the plugin run did not name the typed command: $(cat "$root/holder-err")"; fi
+	# The lock's owner is the CLI process itself (the guard execs it), so a
+	# killed or crashed CLI frees the slot for the next taker.
+	if [ "$(cut -d'|' -f1 "$FAKE_DIR/slot-owners")" = "$(cat "$FAKE_DIR/slot-pid")" ]; then ok; else bad "slot owner $(cat "$FAKE_DIR/slot-owners") is not the CLI pid $(cat "$FAKE_DIR/slot-pid")"; fi
+	if [ "$(cut -d'|' -f3- "$FAKE_DIR/slot-owners")" = "file:list|$P" ]; then ok; else bad "owner line $(cat "$FAKE_DIR/slot-owners")"; fi
+	if [ "$(cat "$root/bg-st")" = 0 ]; then ok; else bad "typed file:list exit $(cat "$root/bg-st")"; fi
+
+	fresh "$sh commands that do not talk to the account never wait for the slot"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" 'sleep 30'
+	for args in --version 'account:manageauth --list' 'object:list --help' 'project:create --type ACCOUNTCUSTOMIZATION'; do
+		t0=$(date +%s)
+		# shellcheck disable=SC2086
+		run_s "$sh" $args
+		if [ "$st" = 0 ] && [ $(($(date +%s) - t0)) -le 2 ]; then ok; else bad "'$args' exit $st after $(($(date +%s) - t0))s"; fi
+	done
+	expect_holder_owns "$root/slots/auth-prod" "pass-through commands leave the slot alone"
+	release_holders
+
+	fresh "$sh Ctrl-C while waiting for the slot cancels cleanly"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" 'sleep 30'
+	(launch_group "$sh" object:list >"$root/out" 2>&1 </dev/null) &
+	pid=$!
+	poll 5 grep -q 'waiting for object:list' "$root/out" || bad "the typed command never waited"
+	kill -s INT -- "-$pid" 2>/dev/null || bad "Ctrl-C: no process group $pid to signal"
+	wait "$pid"
+	st=$?
+	expect_status 130 "Ctrl-C in the slot"
+	expect_not_run "Ctrl-C in the slot"
+	expect_out 'cancelled while waiting for the SuiteCloud CLI slot; nothing was executed' "Ctrl-C message"
+	expect_holder_owns "$root/slots/auth-prod" "Ctrl-C leaves the holder's slot alone"
+	release_holders
+
+	fresh "$sh a production command is approved first and takes the slot only after approval"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" 'echo start-p >>"$1"; sleep 1; [ -e "$2/tern-calls" ] && echo asked >>"$1"; echo end-p >>"$1"'
+	run_s "$sh" project:deploy
+	expect_status 0 "approved deploy"
+	expect_order "start-p asked end-p start-u end-u " "approval asked while the slot was held, CLI run after it freed"
+	expect_ran "approved deploy" project:deploy
+	expect_spool_clean "approved deploy in the slot"
+	release_holders
+
+	fresh "$sh a denied production command never touches the slot"
+	slot_env
+	mode deny
+	plugin_hold "$root/slots/auth-prod" 'sleep 30'
+	t0=$(date +%s)
+	run_s "$sh" project:deploy
+	expect_status 1 "denied deploy"
+	if [ $(($(date +%s) - t0)) -le 3 ]; then ok; else bad "a denial waited for the slot"; fi
+	expect_holder_owns "$root/slots/auth-prod" "denial"
+	release_holders
+
+	fresh "$sh a refusal after the slot was taken gives the slot back"
+	slot_env
+	mode stale
+	run_s "$sh" project:deploy
+	expect_status 1 "stale after approval"
+	expect_out 'fingerprint mismatch' "stale after approval"
+	expect_not_run "stale after approval"
+	if [ ! -e "$root/slots/auth-prod" ]; then ok; else bad "the refused command left its slot taken"; fi
+
+	fresh "$sh Ctrl-C while an approved command waits for the slot"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" 'sleep 30'
+	(launch_group "$sh" project:deploy >"$root/out" 2>&1 </dev/null) &
+	pid=$!
+	poll 5 grep -q 'waiting for object:list' "$root/out" || bad "the approved command never waited"
+	kill -s INT -- "-$pid" 2>/dev/null || bad "Ctrl-C: no process group $pid to signal"
+	wait "$pid"
+	st=$?
+	expect_status 130 "Ctrl-C after approval"
+	expect_not_run "Ctrl-C after approval"
+	expect_out 'cancelled while waiting for the SuiteCloud CLI slot' "Ctrl-C after approval message"
+	expect_spool_clean "Ctrl-C after approval"
+	expect_holder_owns "$root/slots/auth-prod" "Ctrl-C after approval"
+	release_holders
+
+	fresh "$sh non-production and interactive account commands wait too"
+	slot_env
+	printf '{"defaultAuthId": "sandbox"}\n' >"$P/project.json"
+	plugin_hold "$root/slots/auth-sandbox" "$HOLD"
+	run_s "$sh" file:upload -i
+	expect_order "start-p end-p start-u end-u " "sandbox file:upload -i after the plugin run"
+	expect_ran "sandbox file:upload -i" file:upload -i
+	expect_no_tern "sandbox upload"
+	release_holders
+
+	fresh "$sh an unreadable auth ID waits in the shared slot and says so"
+	slot_env
+	printf '{"defaultAuthId": "sandbox", "defaultAuthId": "prod"}\n' >"$P/project.json"
+	plugin_hold "$root/slots/none" "$HOLD"
+	run_s "$sh" object:list
+	expect_order "start-p end-p start-u end-u " "ambiguous project.json"
+	expect_out 'shared slot of projects without a readable auth ID' "ambiguous project.json warning"
+	release_holders
+
+	fresh "$sh without TNS_CLI_SLOTS (outside Tern) nothing is locked"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" 'sleep 30'
+	unset TNS_CLI_SLOTS
+	t0=$(date +%s)
+	run_s "$sh" object:list
+	if [ "$st" = 0 ] && [ $(($(date +%s) - t0)) -le 2 ]; then ok; else bad "exit $st after $(($(date +%s) - t0))s"; fi
+	expect_ran "unlocked object:list" object:list
+	release_holders
+
+	fresh "$sh a relative TNS_CLI_SLOTS is refused"
+	slot_env
+	TNS_CLI_SLOTS=slots
+	run_s "$sh" object:list
+	expect_status 1 "relative TNS_CLI_SLOTS"
+	expect_out 'TNS_CLI_SLOTS must be an absolute path' "relative TNS_CLI_SLOTS"
+	expect_not_run "relative TNS_CLI_SLOTS"
+
+	fresh "$sh status names the slot and what holds it"
+	slot_env
+	plugin_hold "$root/slots/auth-prod" 'sleep 30'
+	case $sh in
+	dash) run_code "$sh" '"$TNS_CORE" status' ;;
+	fish) run_code "$sh" 'source $TNS_SNIP; tern-netsuite-guard-status' ;;
+	*) run_code "$sh" 'source "$TNS_SNIP"; tern-netsuite-guard-status' ;;
+	esac
+	expect_out "^CLI slot: account commands typed here wait in $root/slots/auth-prod\$" "status names the lock"
+	expect_out "^CLI slot: held by object:list \\(pid $holder, in " "status names the holder"
+	release_holders
+}
+
+# The slot through the PATH shim, and a plugin run whose CLI is the shim.
+slot_shim_cases() {
+	[ -n "$slot_script" ] || return
+	holders=
+	fresh "shim: account commands of child processes wait in the slot"
+	slot_env
+	PATH=$shim_dir:$BASE_PATH
+	plugin_hold "$root/slots/auth-prod" "$HOLD"
+	sh -c 'exec suitecloud object:list' >"$root/out" 2>&1
+	st=$?
+	expect_status 0 "shim object:list"
+	expect_order "start-p end-p start-u end-u " "shim object:list after the plugin run"
+	release_holders
+
+	# The plugin's slot script execs its program; when that is the shim the
+	# guard runs in the same process, which already owns the slot.
+	fresh "a plugin run whose program is the shim keeps the slot it holds"
+	slot_env
+	sh -c "$slot_script" tern-netsuite-cli "$root/slots/auth-prod" 5 object:import "$shim_dir/suitecloud" object:import --type ALL >"$root/out" 2>&1
+	st=$?
+	expect_status 0 "plugin run through the shim (75 = it waited for itself)"
+	expect_ran "plugin run through the shim" object:import --type ALL
+	if [ "$(cut -d'|' -f1 "$FAKE_DIR/slot-owners")" = "$(cat "$FAKE_DIR/slot-pid")" ]; then ok; else bad "slot owner is not the CLI"; fi
+}
+
 # launch_group SHELL ARGS...: replaces the current (sub)shell with the
 # suitecloud call running as the leader of a new process group whose id is
 # this (sub)shell's pid, with SIGINT/SIGQUIT at their defaults, as in a
@@ -813,9 +1065,11 @@ for sh in $shells; do
 	TNS_CORE=$core
 	export TNS_SNIP TNS_CORE
 	core_cases "$sh"
+	slot_cases "$sh"
 	[ "$sh" = dash ] || snippet_cases "$sh"
 done
 shim_cases
+slot_shim_cases
 classify_cases
 for want in zsh bash fish; do
 	case " $shells " in
@@ -836,6 +1090,17 @@ t_guard=$(bash -c 'TIMEFORMAT=%R; time (for i in $(seq '$n'); do "$1" suitecloud
 over=$(awk -v d="$t_direct" -v g="$t_guard" -v n="$n" 'BEGIN { printf "%.1f", (g - d) * 1000 / n }')
 printf 'pass-through overhead: %s ms per call (guard %ss vs direct %ss for %d calls)\n' "$over" "$t_guard" "$t_direct" "$n"
 if awk -v o="$over" 'BEGIN { exit !(o < 40) }'; then ok; else bad "pass-through overhead ${over}ms per call exceeds 40ms"; fi
+
+# An account command in a Tern pane also takes and records its slot.
+case_name="slot overhead"
+fresh "$case_name"
+unset TERM_PROGRAM
+TNS_CLI_SLOTS=$root/slots
+export TNS_CLI_SLOTS
+t_slot=$(bash -c 'TIMEFORMAT=%R; time (for i in $(seq '$n'); do "$1" suitecloud project:validate --server; done)' bash "$core" 2>&1 >/dev/null)
+over=$(awk -v d="$t_direct" -v g="$t_slot" -v n="$n" 'BEGIN { printf "%.1f", (g - d) * 1000 / n }')
+printf 'slot overhead: %s ms per call (guard %ss vs direct %ss for %d calls)\n' "$over" "$t_slot" "$t_direct" "$n"
+if awk -v o="$over" 'BEGIN { exit !(o < 80) }'; then ok; else bad "slot overhead ${over}ms per call exceeds 80ms"; fi
 
 printf '%d passed, %d failed, %d skipped\n' "$pass" "$failed" "$skipped"
 [ "$failed" = 0 ]

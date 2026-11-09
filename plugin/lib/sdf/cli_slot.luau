@@ -12,15 +12,22 @@
 --   <tern.plugin.data>/cli-slots/<auth ID>   (mkdir is atomic)
 --   <lock>/owner                             pid|start time|label|cwd
 --
--- SCRIPT (POSIX sh) waits for the lock, records itself as the owner and
--- then `exec`s the CLI, so the owner pid is the CLI process. Nothing ever
--- releases the lock explicitly: the next taker finds the owner gone (dead
--- pid, or a reused pid with another start time) and removes it. A crash,
--- a kill on timeout, a closed pane or a plugin reload therefore never
--- leaves a lock behind for longer than it takes the next taker to look.
--- Removal of a stale lock is serialized by `<lock>.reap`, and the taker
--- checks again inside it, so a fresh lock is never removed by a waiter
--- that saw the previous one stale.
+-- ACQUIRE (POSIX sh) waits for the lock and records its own process as the
+-- owner; SCRIPT runs it and then `exec`s the CLI, so the owner pid is the
+-- CLI process. Nothing ever releases the lock explicitly: the next taker
+-- finds the owner gone (dead pid, or a reused pid with another start time)
+-- and removes it. A crash, a kill on timeout, a closed pane or a plugin
+-- reload therefore never leaves a lock behind for longer than it takes the
+-- next taker to look. Removal of a stale lock is serialized by
+-- `<lock>.reap`, and the taker checks again inside it, so a fresh lock is
+-- never removed by a waiter that saw the previous one stale. A process that
+-- already owns the lock (a slot script that execs the guard, which execs
+-- the CLI: one pid throughout) keeps it instead of waiting for itself.
+--
+-- shell/tern-netsuite-guard embeds ACQUIRE verbatim (tng_slot_acquire) and
+-- takes the same lock for every account command typed in a guarded shell,
+-- right before it execs the CLI; tests/shell/cli-slot/run.sh checks that
+-- the copy matches.
 --
 -- How a module adopts the slot (every plugin module that starts an account
 -- command must):
@@ -28,7 +35,9 @@
 --     CliSlot.waitSeconds(timeoutMs))` instead of argv; exit status
 --     BUSY_STATUS with a one-line stderr means the slot stayed taken;
 --   - a pane: `CliSlot.paneScript{...}` and launch `CliSlot.paneLine`;
---     the pane says what it waits for and waits until the slot frees.
+--     the pane says what it waits for and waits until the slot frees. A
+--     pane that runs the guard passes no lock: the guard takes the slot
+--     itself (after approval), given the slot directory in TNS_CLI_SLOTS.
 -- `lock` is `CliSlot.lockPath(tern.plugin.data, authId)`;
 -- plugin/cli_slot_host.luau does that for adapters.
 --
@@ -39,6 +48,9 @@
 local M = {}
 
 M.DIR = "cli-slots"
+-- The pane environment variable that gives shell/tern-netsuite-guard the
+-- slot directory (M.slotsDir); unset, the guard takes no slot.
+M.ENV = "TNS_CLI_SLOTS"
 -- Exit status when a bounded wait for the slot ran out (EX_TEMPFAIL).
 M.BUSY_STATUS = 75
 -- $0 of the slot shell, as `ps` shows it.
@@ -59,20 +71,21 @@ M.ACCOUNT_COMMANDS = table.freeze({
 	"file:upload",
 })
 
--- Takes the slot `$1` (lock dir), waits at most `$2` seconds (0: until it
--- frees, telling stderr once what it waits for), records `$3` as what holds
--- it and execs the rest of the arguments. One line, no single quotes and no
--- backslashes, so it survives being quoted inside another POSIX/fish line.
-M.SCRIPT = table.concat({
-	"lock=$1 wait=$2 label=$3",
-	"shift 3",
+-- Takes the slot `$lock` (lock dir), waiting at most `$wait` seconds (0:
+-- until it frees, telling stderr once what it waits for; else exit
+-- BUSY_STATUS), and records `$label` and this process as what holds it.
+-- Defines held/gone/reap and the variables me, pid, start, what, dir, n,
+-- missing and told. One line, no single quotes and no backslashes, so it
+-- survives being quoted inside another POSIX/fish line.
+M.ACQUIRE = table.concat({
 	'mkdir -p "${lock%/*}" 2>/dev/null',
 	'me=$(ps -o lstart= -p "$$" 2>/dev/null)',
-	'held() { pid= start= what= dir=; IFS="|" read -r pid start what dir <"$lock/owner" 2>/dev/null; [ -n "$pid" ]; }',
-	'gone() { ! kill -0 "$pid" 2>/dev/null || [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" != "$start" ]; }',
+	'held() { pid= start= what= dir=; IFS="|" read -r pid start what dir 2>/dev/null <"$lock/owner"; [ -n "$pid" ]; }',
+	'gone() { ! kill -0 "$pid" 2>/dev/null || [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" != "$start" ] || case $(ps -o stat= -p "$pid" 2>/dev/null) in *Z*) true ;; *) false ;; esac; }',
 	'reap() { if mkdir "$lock.reap" 2>/dev/null; then if held; then gone && rm -rf "$lock"; elif [ "$missing" -ge 5 ]; then rm -rf "$lock"; fi; rmdir "$lock.reap"; elif [ -n "$(find "$lock.reap" -prune -mmin +1 2>/dev/null)" ]; then rmdir "$lock.reap" 2>/dev/null; fi; }',
 	"n=0 missing=0 told=",
-	'until mkdir "$lock" 2>/dev/null; do'
+	'if held && [ "$pid" = "$$" ] && [ -n "$me" ] && [ "$start" = "$me" ]; then :; else'
+		.. ' until mkdir "$lock" 2>/dev/null; do'
 		.. " if held; then missing=0; else missing=$((missing + 1)); fi;"
 		.. ' if { [ -n "$pid" ] && gone; } || [ "$missing" -ge 5 ]; then reap; mkdir "$lock" 2>/dev/null && break; fi;'
 		.. ' if [ "$wait" -eq 0 ] && [ -z "$told" ] && [ -n "$pid" ]; then'
@@ -84,8 +97,17 @@ M.SCRIPT = table.concat({
 		.. " exit 75;"
 		.. " fi;"
 		.. " sleep 1;"
-		.. " done",
-	'printf "%s|%s|%s|%s" "$$" "$me" "$label" "$PWD" >"$lock/owner"',
+		.. " done;"
+		.. ' printf "%s|%s|%s|%s" "$$" "$me" "$label" "$PWD" >"$lock/owner";'
+		.. " fi",
+}, "; ")
+
+-- Takes the slot `$1` (lock dir), waits at most `$2` seconds (see ACQUIRE),
+-- records `$3` as what holds it and execs the rest of the arguments.
+M.SCRIPT = table.concat({
+	"lock=$1 wait=$2 label=$3",
+	"shift 3",
+	M.ACQUIRE,
 	'exec "$@"',
 }, "; ")
 
@@ -99,8 +121,13 @@ local function hex(s: string): string
 	end))
 end
 
--- The lock directory of `authId` (nil: a project without defaultAuthId,
--- whose commands fail in the CLI anyway, share one slot).
+-- The directory holding every auth ID's lock (TNS_CLI_SLOTS for the guard).
+function M.slotsDir(dataDir: string): string
+	return dataDir .. "/" .. M.DIR
+end
+
+-- The lock directory of `authId` (nil: a project without a readable
+-- defaultAuthId, whose commands fail in the CLI anyway, share one slot).
 function M.lockPath(dataDir: string, authId: string?): string
 	local name: string
 	if authId == nil then
@@ -110,7 +137,7 @@ function M.lockPath(dataDir: string, authId: string?): string
 	else
 		name = "hex-" .. hex(authId)
 	end
-	return dataDir .. "/" .. M.DIR .. "/" .. name
+	return M.slotsDir(dataDir) .. "/" .. name
 end
 
 -- Seconds a background run waits for the slot: half its timeout, so the
@@ -175,15 +202,18 @@ export type Pane = {
 	intro: string,
 	-- Where the command runs (the CLI reads project.json from there).
 	cwd: string,
-	lock: string,
+	-- The slot the pane waits in; nil when the command takes it itself
+	-- (the guard, which may first wait for an approval).
+	lock: string?,
 	argv: { string },
 }
 
--- The `sh` script of a pane that runs `p.argv` in `p.cwd` inside the slot,
--- then shows the exit status and waits for Enter so the output stays. Nil
--- and why when a word cannot be put into a shell line safely.
+-- The `sh` script of a pane that runs `p.argv` in `p.cwd` (inside the slot
+-- `p.lock` when given), then shows the exit status and waits for Enter so
+-- the output stays. Nil and why when a word cannot be put into a shell line
+-- safely.
 function M.paneScript(p: Pane): (string?, string?)
-	for _, w in { p.cwd, p.lock } do
+	for _, w in { p.cwd, p.lock or "" } do
 		local why = M.unsafe(w)
 		if why then
 			return nil, w .. " " .. why .. ", which cannot be passed safely through a shell line"
@@ -195,7 +225,10 @@ function M.paneScript(p: Pane): (string?, string?)
 			return nil, M.printable(w) .. " " .. why .. ", which cannot be passed safely through a shell line"
 		end
 	end
-	local words: { string } = { "sh", "-c", M.quote(M.SCRIPT), M.NAME, M.quote(p.lock), "0", label(p.argv) }
+	local words: { string } = {}
+	if p.lock then
+		words = { "sh", "-c", M.quote(M.SCRIPT), M.NAME, M.quote(p.lock), "0", label(p.argv) }
+	end
 	for _, w in p.argv do
 		table.insert(words, M.quote(w))
 	end

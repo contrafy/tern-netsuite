@@ -101,7 +101,7 @@ describe("the account an upload goes to", function()
 end)
 
 describe("the command the upload pane runs", function()
-	local LOCK = "/data/cli-slots/auth-demo-sb"
+	local SLOTS = "/data/cli-slots"
 	local sandbox: Upload.Target =
 		{ authId = "demo-sb", label = "1234567_SB1", accountId = "1234567_SB1", production = false, source = "cli" }
 	local prod: Upload.Target = { authId = "PRODUCTION", label = "PRODUCTION", production = true, source = "unknown" }
@@ -111,20 +111,30 @@ describe("the command the upload pane runs", function()
 			owner("billing", "/repo/sdf/billing", "src/FileCabinet/SuiteScripts/b.js", "/SuiteScripts/b.js"),
 			GUARD,
 			sandbox,
-			LOCK
+			SLOTS
 		)
 		assert(launch, "launch")
 		expect(launch.argv).toEqual({ GUARD, "suitecloud", "file:upload", "--paths", "/SuiteScripts/b.js" })
 		expect(launch.cwd).toBe("/repo/sdf/billing")
-		expect(launch.script).toContain("cd /repo/sdf/billing && sh -c ")
+		expect(launch.script).toContain("cd /repo/sdf/billing && env ")
 		expect(launch.script).toContain(GUARD .. " suitecloud file:upload --paths /SuiteScripts/b.js")
 		expect(string.sub(launch.line, 1, 7)).toBe("sh -c '")
 	end)
 
-	it("waits in the auth ID's CLI slot, so a second upload or a browser listing never runs beside it", function()
-		local launch = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, LOCK)
-		assert(launch, "launch")
-		expect(launch.script).toContain(LOCK .. " 0 file:upload " .. GUARD .. " suitecloud file:upload")
+	it(
+		"leaves the CLI slot to the guard, so a pending approval never holds back other commands for the auth ID",
+		function()
+			local launch = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, SLOTS)
+			assert(launch, "launch")
+			expect((string.find(launch.script, CliSlot.NAME, 1, true))).toBeNil()
+			expect(launch.script).toContain("env TNS_CLI_SLOTS=" .. SLOTS .. " " .. GUARD .. " suitecloud file:upload")
+		end
+	)
+
+	it("refuses a slot directory that is not absolute, which the guard would refuse after approval", function()
+		local launch, err = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, "data/slots")
+		expect(launch).toBeNil()
+		expect(err).toContain("CLI slot directory")
 	end)
 
 	it("keeps the pane open with the exit status so a failed upload is visible", function()
@@ -132,7 +142,7 @@ describe("the command the upload pane runs", function()
 			owner("b", "/r/b", "src/FileCabinet/SuiteScripts/b.js", "/SuiteScripts/b.js"),
 			GUARD,
 			sandbox,
-			LOCK
+			SLOTS
 		)
 		assert(launch, "launch")
 		expect(launch.script).toContain("s=$?; printf")
@@ -145,7 +155,7 @@ describe("the command the upload pane runs", function()
 			owner("o'brien", "/repo/sdf/Billing app", "src/FileCabinet/SuiteScripts/a b.js", "/SuiteScripts/a b.js"),
 			GUARD,
 			prod,
-			LOCK
+			SLOTS
 		)
 		assert(launch, "launch")
 		expect(launch.script).toContain([[cd '/repo/sdf/Billing app' && ]])
@@ -156,11 +166,12 @@ describe("the command the upload pane runs", function()
 
 	it("refuses paths with backslashes or quotes: fish reads \\' inside single quotes as a quote", function()
 		for _, fc in { "/SuiteScripts/a\\'; touch x; '.js", "/SuiteScripts/it's.js" } do
-			local launch, err = Upload.command(owner("b", "/r/b", "src/FileCabinet" .. fc, fc), GUARD, sandbox, LOCK)
+			local launch, err = Upload.command(owner("b", "/r/b", "src/FileCabinet" .. fc, fc), GUARD, sandbox, SLOTS)
 			expect(launch).toBeNil()
 			expect(err).toContain("shell line")
 		end
-		local launch, err = Upload.command(owner("b", "/repo/O'Brien", "x", "/SuiteScripts/x.js"), GUARD, sandbox, LOCK)
+		local launch, err =
+			Upload.command(owner("b", "/repo/O'Brien", "x", "/SuiteScripts/x.js"), GUARD, sandbox, SLOTS)
 		expect(launch).toBeNil()
 		expect(err).toContain("shell line")
 	end)
@@ -170,7 +181,7 @@ describe("the command the upload pane runs", function()
 			owner("b", "/r/b", 'src/FileCabinet/SuiteScripts/say "hi".js', '/SuiteScripts/say "hi".js'),
 			GUARD,
 			sandbox,
-			LOCK
+			SLOTS
 		)
 		expect(launch).toBeNil()
 		expect(err).toContain("double quote")
@@ -178,16 +189,16 @@ describe("the command the upload pane runs", function()
 
 	it("refuses paths with control characters or dot segments that could aim the upload elsewhere", function()
 		for _, fc in { "/SuiteScripts/a\nb.js", "/SuiteScripts/../x.js", "SuiteScripts/x.js", "/SuiteScripts/./x.js" } do
-			local launch = Upload.command(owner("b", "/r/b", "src/FileCabinet" .. fc, fc), GUARD, sandbox, LOCK)
+			local launch = Upload.command(owner("b", "/r/b", "src/FileCabinet" .. fc, fc), GUARD, sandbox, SLOTS)
 			expect(launch).toBeNil()
 		end
-		expect((Upload.command(owner("b", "relative/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, LOCK))).toBeNil()
-		expect((Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), "guard", sandbox, LOCK))).toBeNil()
+		expect((Upload.command(owner("b", "relative/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, SLOTS))).toBeNil()
+		expect((Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), "guard", sandbox, SLOTS))).toBeNil()
 	end)
 
 	it("names the target account and whether approval is needed in the pane title", function()
-		local a = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, LOCK)
-		local b = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, prod, LOCK)
+		local a = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, sandbox, SLOTS)
+		local b = Upload.command(owner("b", "/r/b", "x", "/SuiteScripts/x.js"), GUARD, prod, SLOTS)
 		assert(a and b, "launch")
 		expect(a.title).toContain("1234567_SB1")
 		expect(b.title).toContain("PRODUCTION")

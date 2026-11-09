@@ -187,5 +187,56 @@ for w in "/a\\b" "/a'b" '/a"b'; do
 	fi
 done
 
+# --------------------------------------------------------------------------
+reset "a holder that exited but was not reaped yet (a zombie) frees the slot"
+# perl forks the holder and does not wait for it while it sleeps.
+perl -e 'my $p = fork(); if ($p == 0) { exec "sh", "-c", $ARGV[0], "tern-netsuite-cli", $ARGV[1], "30", "object:list", "true" } sleep 6' \
+	"$script" "$lock" &
+parent=$!
+i=0
+while [ $i -lt 50 ] && [ ! -s "$lock/owner" ]; do
+	sleep 0.1
+	i=$((i + 1))
+done
+sleep 0.5
+start=$(date +%s)
+slot "$lock" 10 file:list sh -c "echo ran >>'$root/log'" 2>"$root/err"
+if grep -q ran "$root/log" && [ $(($(date +%s) - start)) -le 3 ]; then ok; else bad "a zombie holder kept the slot"; fi
+kill "$parent" 2>/dev/null
+wait "$parent" 2>/dev/null
+
+# --------------------------------------------------------------------------
+# A slot script that execs another taker of the same slot in the same
+# process (the plugin's script running the guard through the PATH shim).
+reset "a process that already owns the slot keeps it instead of waiting for itself"
+slot "$lock" 3 object:import sh -c "$script" tern-netsuite-cli "$lock" 3 object:import sh -c "echo ran >>'$root/log'" 2>"$root/err"
+st=$?
+if [ "$st" = 0 ] && grep -q ran "$root/log"; then ok; else bad "exit $st: the same process waited for itself"; fi
+
+# --------------------------------------------------------------------------
+# The guard (shell/tern-netsuite-guard) takes the same locks for commands
+# typed in a shell; both sides must agree on the code and the names.
+guard=$repo/shell/tern-netsuite-guard
+reset "the guard's copy of the acquire step is the plugin's"
+want=$(cd "$here" && "$luau" slot.luau -a acquire)
+got=$(sed -n "s/^tng_slot_acquire='\\(.*\\)'\$/\\1/p" "$guard")
+if [ -n "$want" ] && [ "$want" = "$got" ]; then ok; else bad "shell/tern-netsuite-guard tng_slot_acquire differs from CliSlot.ACQUIRE"; fi
+
+reset "the guard names the same lock directory as the plugin for every auth ID"
+mkdir -p "$root/proj"
+long=a0123456789012345678901234567890123456789012345678901234567890123456789
+for id in demo-sb demo_prod.v2 .hidden -dash "$long" none; do
+	if [ "$id" = none ]; then
+		rm -f "$root/proj/project.json"
+		want=$(cd "$here" && "$luau" slot.luau -a lock "$root/data")
+	else
+		printf '{\n  "defaultAuthId": "%s"\n}\n' "$id" >"$root/proj/project.json"
+		want=$(cd "$here" && "$luau" slot.luau -a lock "$root/data" "$id")
+	fi
+	got=$(cd "$root/proj" && TNS_CLI_SLOTS=$root/data/cli-slots sh "$guard" status 2>/dev/null |
+		sed -n 's/^CLI slot: account commands typed here wait in //p')
+	if [ "$got" = "$want" ]; then ok; else bad "auth ID $id: guard '$got', plugin '$want'"; fi
+done
+
 echo "cli-slot: $pass passed, $failed failed"
 [ "$failed" = 0 ]

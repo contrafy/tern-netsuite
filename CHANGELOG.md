@@ -25,3 +25,18 @@ First version.
   (Tern names them `page_up` / `page_down`).
 - Row lists keep the selected row visible in short panes; the key hints give
   way first.
+- One SuiteCloud account command per auth ID across blocks, panes, windows
+  and plugin reloads; imports run in their own split pane.
+- Links printed by other programs never start work: bare browser and logs
+  links open the block waiting for Enter; uploads, imports, health refresh,
+  CI logs and NetSuite query/credential links need a single-use grant.
+- Paths with backslashes, quotes or control characters are refused for
+  imports and uploads (fish would parse them differently).
+- Config edits reach the guard environment of new panes without a reload.
+- Deploy history: a deploy's status is recorded only when the line's exit
+  status is its own, and every `NAME=value` word is redacted.
+- Logs: full pages continue from the newest row of the page, nothing is cut
+  after an empty first load, retries never come sooner than a normal poll.
+- New script: SuiteApp projects scaffold under
+  `/SuiteApps/<publisherid>.<projectid>`; writes refuse symlinks and paths
+  outside the project; the real deploy.xml / manifest.xml edit error shows.

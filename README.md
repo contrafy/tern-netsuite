@@ -91,8 +91,15 @@ Everything in the "SDF CLI" section works with no NetSuite credentials. The
 The SuiteCloud CLI reads `project.json` and `suitecloud.config.js` from the
 current directory only, and refreshes OAuth tokens on every account command.
 Running two account commands for the same auth ID at the same time can
-invalidate its token and force a browser re-login; the plugin runs its own
-CLI calls one at a time.
+invalidate its token and force a browser re-login, so every account command
+the plugin starts (listings, imports, uploads) takes one machine-wide slot
+per auth ID: they never overlap, also across windows and plugin reloads, and
+a waiting pane says what it waits for.
+
+`tern-netsuite://` links that any program prints never start work on their
+own: a bare link opens the block waiting for Enter (browser, logs) or is
+ignored (uploads, imports, health refresh, CI logs), which need a
+single-use grant from the plugin's own UI.
 
 ## Account monitoring
 

@@ -383,6 +383,16 @@ describe("project detail", function()
 		expect(copy.text).toBe("cd /repo/sdf/billing && suitecloud project:validate")
 		expect(#effects).toBe(1)
 	end)
+
+	it("does not copy a command whose paths a shell could split differently (fish reads \\' as a quote)", function()
+		local s = detail()
+		local cfg = table.clone(s.config :: any)
+		cfg.suitecloud = { program = "/opt/it's/suitecloud", timeout_ms = 60000 }
+		s.config = cfg
+		local s2, effects = key(s, "v")
+		expect(find(effects, "copy")).toBeNil()
+		expect(screen(s2)).toContain("shell line")
+	end)
 end)
 
 describe("findings", function()

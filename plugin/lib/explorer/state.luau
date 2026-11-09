@@ -6,6 +6,7 @@
 -- answers back as messages. Every async answer carries the generation of
 -- the scan that asked for it; a rescan bumps it so late answers are dropped.
 
+local CliSlot = require("../sdf/cli_slot")
 local Checks = require("../sdf/checks")
 local Project = require("../sdf/project")
 local Resolve = require("../account/resolve")
@@ -446,7 +447,18 @@ local function copyValidate(s: State, effects: { Effect })
 		return
 	end
 	local program = if s.config then s.config.suitecloud.program else "suitecloud"
-	local text = "cd " .. Upload.quote(p.root) .. " && " .. Upload.quote(program) .. " project:validate"
+	for _, w in { p.root, program } do
+		local why = CliSlot.unsafe(w)
+		if why then
+			setNotice(
+				s,
+				CliSlot.printable(w) .. " " .. why .. ", which cannot be passed safely through a shell line",
+				"warning"
+			)
+			return
+		end
+	end
+	local text = "cd " .. CliSlot.quote(p.root) .. " && " .. CliSlot.quote(program) .. " project:validate"
 	table.insert(effects, { t = "copy", text = text, note = "Copied: " .. text })
 end
 

@@ -1,4 +1,5 @@
 --!strict
+local CliSlot = require("../../../plugin/lib/sdf/cli_slot")
 local Diff = require("../../../plugin/lib/browser/diff")
 local Imports = require("../../../plugin/lib/browser/imports")
 local sample = require("./sample")
@@ -107,12 +108,29 @@ describe("validation", function()
 	it("refuses a relative project root", function()
 		expect((Imports.argv("suitecloud", with({ root = "work/p" })))).toBeNil()
 	end)
+
+	it("refuses paths a shell line cannot carry: fish reads \\' inside single quotes as a quote", function()
+		for _, path in { "/SuiteScripts/a\\'; touch x; '.js", "/SuiteScripts/it's.js", '/SuiteScripts/"x".js' } do
+			local argv, err = Imports.argv("suitecloud", with({ kind = "file", path = path }))
+			expect(argv).toBeNil()
+			expect(err).toContain("shell line")
+		end
+		expect((Imports.argv("suitecloud", with({ root = "/work/o'brien" })))).toBeNil()
+		expect((Imports.argv("suitecloud", with({ projectFolder = "s\\rc" })))).toBeNil()
+		expect((Imports.argv("suitecloud", with({ destinationFolder = "/Objects/a\\b" })))).toBeNil()
+	end)
+
+	it("refuses a configured CLI program a shell line cannot carry", function()
+		local argv, err = Imports.argv("/opt/it's/suitecloud", base)
+		expect(argv).toBeNil()
+		expect(err).toContain("shell line")
+	end)
 end)
 
 describe("the command shown in the split pane", function()
 	it("quotes words so a shell runs exactly the argv", function()
-		local line = Imports.commandLine({ "suitecloud", "file:import", "--paths", "/SuiteScripts/it's here.js" })
-		expect(line).toBe("suitecloud file:import --paths '/SuiteScripts/it'\\''s here.js'")
+		local line = Imports.commandLine({ "suitecloud", "file:import", "--paths", "/SuiteScripts/a b.js" })
+		expect(line).toBe("suitecloud file:import --paths '/SuiteScripts/a b.js'")
 	end)
 
 	it("leaves plain words bare so the command reads naturally", function()
@@ -122,8 +140,41 @@ describe("the command shown in the split pane", function()
 	end)
 
 	it("quotes shell metacharacters", function()
-		expect(Imports.quote("a;rm -rf ~")).toBe("'a;rm -rf ~'")
-		expect(Imports.quote("$(x)")).toBe("'$(x)'")
+		expect(Imports.commandLine({ "a;rm -rf ~", "$(x)" })).toBe("'a;rm -rf ~' '$(x)'")
+	end)
+end)
+
+describe("the import pane", function()
+	local LOCK = "/data/cli-slots/auth-demo-sb"
+	local base: Request = {
+		kind = "object",
+		root = "/work/p",
+		projectFolder = "src",
+		type = "restlet",
+		scriptId = "customscript_x",
+		destinationFolder = "/Objects",
+		excludeFiles = false,
+	}
+
+	it("runs the import in the project directory inside the auth ID's CLI slot and keeps its output open", function()
+		local l = Imports.launch("suitecloud", base, LOCK) :: Imports.Launch
+		expect(l.argv).toEqual(Imports.argv("suitecloud", base) :: { string })
+		expect(l.cwd).toBe("/work/p")
+		expect(l.script).toContain("cd /work/p && sh -c ")
+		expect(l.script).toContain(
+			LOCK
+				.. " 0 object:import suitecloud object:import --type restlet --scriptid customscript_x --destinationfolder /Objects"
+		)
+		expect(l.script).toContain('exit "$s"')
+		expect(l.line).toBe(CliSlot.paneLine(l.script))
+		expect(l.title).toContain("customscript_x")
+	end)
+
+	it("refuses what validation refuses, and a lock path a shell line cannot carry", function()
+		local bad = table.clone(base)
+		bad.scriptId = "--excludefiles"
+		expect((Imports.launch("suitecloud", bad, LOCK))).toBeNil()
+		expect((Imports.launch("suitecloud", base, "/data/it's/lock"))).toBeNil()
 	end)
 end)
 

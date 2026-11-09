@@ -1,6 +1,7 @@
 --!strict
 local Config = require("../../../plugin/lib/config")
 local Render = require("../../../plugin/lib/browser/render")
+local Resolve = require("../../../plugin/lib/account/resolve")
 local State = require("../../../plugin/lib/browser/state")
 local fixtures = require("../../lib/fixtures")
 local json = require("../../lib/json")
@@ -427,6 +428,93 @@ describe("importing", function()
 	end)
 end)
 
+describe("one SuiteCloud account command per auth ID", function()
+	it(
+		"runs listings in the auth ID's machine-wide CLI slot, so other blocks, panes and reloads never overlap them",
+		function()
+			local s, effects = scanned("demo-sb")
+			local objects = run(effects, "objects") :: Effect
+			expect(objects.slot).toBe("demo-sb")
+			local _, after = ran(s, objects, fixture("object-all"))
+			expect((run(after, "files") :: Effect).slot).toBe("demo-sb")
+		end
+	)
+
+	it("looks the account up outside the slot: manageauth --info does not use the auth ID's token", function()
+		local _, effects = scanned("other-sb")
+		expect((run(effects, "info") :: Effect).slot).toBeNil()
+	end)
+
+	it("hands the import its auth ID, so its pane waits in the same slot as the listings", function()
+		local s = select(listed(), "customscript_demo_90")
+		local _, effects = keys(s, { "I" })
+		expect(effects[1].t).toBe("import")
+		expect(effects[1].authId).toBe("demo-sb")
+	end)
+end)
+
+describe("the account clock", function()
+	it("asks the CLI again after a failed lookup once the retry interval has passed and the user refreshes", function()
+		local s = State.init({ cwd = sample.ROOT .. "/src" })
+		s = step(s, { t = "config", config = CFG, now = 1000 })
+		s = step(s, { t = "found", gen = s.gen, root = sample.ROOT })
+		local effects
+		s, effects = step(s, { t = "scanned", gen = s.gen, project = sample.project("other-sb"), now = 1000 })
+		s, effects = ran(s, run(effects, "info") :: Effect, "", 1, { stderr = "no such auth ID", now = 2000 })
+		s = ran(s, run(effects, "objects") :: Effect, fixture("object-all"), 0, { now = 3000 })
+		s = keys(s, { "r" })
+		local later = 2000 + Resolve.ERROR_TTL_MS
+		s, effects = step(s, { t = "scanned", gen = s.gen, project = sample.project("other-sb"), now = later })
+		local queued = table.clone(effects)
+		table.move(s.queue, 1, #s.queue, #queued + 1, queued)
+		expect(run(queued, "info") ~= nil).toBe(true)
+	end)
+end)
+
+describe("opened from a link", function()
+	-- What a bare `tern-netsuite://browser?cwd=` link opens.
+	local function waiting(authId: string?): (S, { Effect })
+		local s = State.init({ cwd = sample.ROOT .. "/src", held = true })
+		s = step(s, { t = "config", config = CFG, now = 1000 })
+		s = step(s, { t = "found", gen = s.gen, root = sample.ROOT })
+		return step(s, { t = "scanned", gen = s.gen, project = sample.project(authId), now = 1000 })
+	end
+
+	it("runs no CLI command until Enter, so a link printed by another program cannot start one", function()
+		local s, effects = waiting("other-sb")
+		expect(run(effects, "info")).toBeNil()
+		expect(run(effects, "objects")).toBeNil()
+		expect(#s.queue).toBe(0)
+		local text = viewText(s)
+		expect(text).toContain(sample.ROOT)
+		expect(text).toContain("other-sb")
+		expect(text).toContain("Enter")
+	end)
+
+	it("names the configured account it would list before anything runs", function()
+		local s = waiting("demo-prod")
+		local text = viewText(s)
+		expect(text).toContain("PROD")
+		expect(text).toContain("1234567")
+	end)
+
+	it("lists the account once the user presses Enter", function()
+		local s = waiting("other-sb")
+		local effects
+		s, effects = keys(s, { "enter" })
+		expect(run(effects, "info") ~= nil).toBe(true)
+		expect(State.saved(s).held).toBe(false)
+	end)
+
+	it("keeps waiting across a refresh and a plugin reload", function()
+		local s = waiting("demo-sb")
+		expect(State.saved(s).held).toBe(true)
+		s = keys(s, { "r" })
+		local _, effects = step(s, { t = "scanned", gen = s.gen, project = sample.project("demo-sb"), now = 2000 })
+		expect(run(effects, "objects")).toBeNil()
+	end)
+end)
+
 describe("clicks", function()
 	it("switch tabs, sides and rows like the keys do", function()
 		local s = listed()
@@ -463,19 +551,19 @@ describe("rendering", function()
 		expect(list.p.selected).toBe("main.rows.r:" .. selected.kind .. ":" .. selected.id)
 	end)
 
-	it("draws only a window around the selection of a listing past MAX_ROWS", function()
+	it("keeps the scrolling list at or under 200 rows: Tern virtualizes longer lists and drops their clicks", function()
 		local s = listed()
 		local many = {}
-		for i = 1, Render.MAX_ROWS + 50 do
+		for i = 1, 350 do
 			table.insert(many, { kind = "object", id = string.format("customlist_many_%03d", i), where = "account" })
 		end
 		s.entries.object = many :: any
 		s = keys(s, { "end" })
 		local list = rowList(s)
-		expect(#list.c).toBe(Render.MAX_ROWS)
+		expect(#list.c <= 200).toBe(true)
 		local text = textOf(Render.view(s).main)
 		expect(text).toContain("customlist_many_350")
-		expect(text).toContain("50 above")
+		expect(text).toContain(string.format("%d above", 350 - #list.c))
 		expect((string.find(text, "customlist_many_001", 1, true))).toBeNil()
 	end)
 

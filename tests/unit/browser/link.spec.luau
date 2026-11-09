@@ -47,10 +47,73 @@ describe("browser links", function()
 	end)
 end)
 
+describe("opening the browser from a link", function()
+	it("opens a bare directory link waiting for Enter, since any program can print one", function()
+		local l = Link.parse(Link.browseUrl("/work/demo")) :: Link.Parsed
+		local cwd, held = Link.fromArgs(Link.blockArgs(l.cwd, true))
+		expect(cwd).toBe("/work/demo")
+		expect(held).toBe(true)
+		local none, heldNone = Link.fromArgs(Link.blockArgs(nil, true))
+		expect(none).toBeNil()
+		expect(heldNone).toBe(true)
+	end)
+
+	it("opens the lens chip's link at once: it carries only a single-use grant naming the directory", function()
+		local url = Link.grantUrl(ID)
+		expect(url).toBe("tern-netsuite://browser?grant=" .. ID)
+		expect((string.find(url, "work", 1, true))).toBeNil()
+		local l = Link.parse(url) :: Link.Parsed
+		expect(l.t).toBe("grant")
+		expect(l.id).toBe(ID)
+		local stored = Link.addBrowse(nil, ID, "/work/demo", 1000)
+		local cwd, rest, why = Link.takeBrowse(stored, ID, 1010)
+		expect(why).toBeNil()
+		expect(cwd).toBe("/work/demo")
+		local opened, held = Link.fromArgs(Link.blockArgs(cwd, false))
+		expect(opened).toBe("/work/demo")
+		expect(held).toBe(false)
+		local again, _, why2 = Link.takeBrowse(rest, ID, 1011)
+		expect(again).toBeNil()
+		expect(why2).toContain("already used")
+	end)
+
+	it("expires browse grants so a stale chip link cannot start the CLI later", function()
+		local stored = Link.addBrowse(nil, ID, "/work/demo", 1000)
+		local cwd, _, why = Link.takeBrowse(stored, ID, 1000 + Link.TTL_SECONDS + 1)
+		expect(cwd).toBeNil()
+		expect(why).toContain("expired")
+	end)
+
+	it("refuses a stored directory that is not absolute (the store is a shared JSON file)", function()
+		local cwd = Link.takeBrowse({ [ID] = { cwd = "work", exp = 2000 } }, ID, 1000)
+		expect(cwd).toBeNil()
+	end)
+
+	it("keeps the browse grant store bounded", function()
+		local stored: any = nil
+		for i = 1, Link.MAX_GRANTS + 5 do
+			stored = Link.addBrowse(stored, string.format("%032x", i), "/work/demo", 1000 + i)
+		end
+		local n = 0
+		for _ in stored do
+			n += 1
+		end
+		expect(n).toBe(Link.MAX_GRANTS)
+	end)
+
+	it("does not read a browse grant id as an import grant or the other way round", function()
+		expect((Link.parse("tern-netsuite://browser?grant=XYZ"))).toBeNil()
+		expect((Link.parse(Link.grantUrl(ID)) :: Link.Parsed).t).toBe("grant")
+		expect((Link.parse(Link.importUrl(ID)) :: Link.Parsed).t).toBe("import")
+	end)
+end)
+
 describe("import grants", function()
-	it("hands a stored import over exactly once", function()
-		local stored = Link.addGrant(nil, ID, { request = REQ, label = "demo -> 1234567_SB1", exp = 0 }, 1000)
+	it("hands a stored import over exactly once, with the auth ID whose CLI slot it waits in", function()
+		local stored =
+			Link.addGrant(nil, ID, { request = REQ, label = "demo -> 1234567_SB1", authId = "demo-sb", exp = 0 }, 1000)
 		local g, rest, why = Link.takeGrant(stored, ID, 1010)
+		expect((g :: Link.Grant).authId).toBe("demo-sb")
 		expect(why).toBeNil()
 		expect((g :: Link.Grant).request).toEqual(REQ)
 		local again, _, why2 = Link.takeGrant(rest, ID, 1010)

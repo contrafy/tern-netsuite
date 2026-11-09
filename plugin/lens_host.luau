@@ -13,6 +13,12 @@ local Viewstate = require("./lib/lens/viewstate")
 
 local log = tern.log
 
+-- Grant ids for the chips that start work in the window: "Browse, diff and
+-- import" (lib/browser/link.luau) and "Tail logs" (lib/monitor/logs/link.luau
+-- grantStart). A plain link would open the block held until Enter.
+local seed = string.format("lens:%d:%.6f:%.17g:%s", os.time(), os.clock(), math.random(), tostring({}))
+local counter = 0
+
 type ViewState = Viewstate.ViewState
 
 -- open/line/finish only record: Tern replays them on rehydration, so they
@@ -184,13 +190,23 @@ function M.register()
 				elseif ev.act == "copy" then
 					copy(state, value, cx)
 				elseif ev.act == "logs" then
-					-- Only a link the window's logs route accepts reaches cx:open.
-					local decision = LogsLink.route(value)
-					if decision then
-						cx:open(value)
+					counter += 1
+					local id = LogsLink.newId(seed, counter)
+					local url, grants = LogsLink.grantStart(value, tern.kv.get(LogsLink.GRANTS_KEY), id, os.time())
+					if url and grants then
+						tern.kv.set(LogsLink.GRANTS_KEY, grants)
+						cx:open(url)
 					end
 				elseif ev.act == View.BROWSE_ACTION then
-					cx:open(Link.browseUrl(absolute(state.run.cwd)))
+					local cwd = absolute(state.run.cwd)
+					if cwd then
+						counter += 1
+						local id = Link.newId(seed, counter)
+						tern.kv.set(Link.BROWSE_KEY, Link.addBrowse(tern.kv.get(Link.BROWSE_KEY), id, cwd, os.time()))
+						cx:open(Link.grantUrl(id))
+					else
+						cx:open(Link.browseUrl(nil))
+					end
 				end
 			end)
 			if not ok then

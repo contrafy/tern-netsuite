@@ -2,10 +2,13 @@
 -- Host glue for the account browser block (lib/browser/state.luau): finds
 -- and scans the project of the directory it was opened for, runs the
 -- SuiteCloud CLI and git processes the core asks for and feeds every answer
--- back as a message. An import is handed to the window (which opens a
--- split) through a single-use tern.kv grant and a
+-- back as a message. Account commands run in their auth ID's machine-wide
+-- CLI slot (cli_slot_host.luau), so blocks, panes, other VMs and processes
+-- left running by a plugin reload never overlap. An import is handed to the
+-- window (which opens a split) through a single-use tern.kv grant and a
 -- `tern-netsuite://browser/import?grant=<id>` link.
 
+local CliSlotHost = require("./cli_slot_host")
 local ConfigHost = require("./config_host")
 local Link = require("./lib/browser/link")
 local Project = require("./lib/sdf/project")
@@ -63,27 +66,13 @@ local function deliver(h: Host, msg: Msg)
 	end)
 end
 
--- Every browser block on this host shares one SuiteCloud CLI slot: two
--- blocks on projects with the same auth ID would otherwise race on its
--- token refresh (lib/browser/state.luau serializes within a block).
-local cliBusy = false
-local cliWaiting: { () -> () } = {}
-
-local function cliDone()
-	cliBusy = false
-	local nextStart = table.remove(cliWaiting, 1)
-	if nextStart then
-		cliBusy = true
-		nextStart()
-	end
-end
-
 local function run(h: Host, e: Effect)
-	local cli = e.step ~= "dirty"
+	local argv = e.argv :: { string }
+	local timeout = e.timeoutMs :: number
+	if e.slot then
+		argv = CliSlotHost.wrap(argv, e.slot, timeout)
+	end
 	local function answer(status: number, stdout: string, stderr: string, timedOut: boolean)
-		if cli then
-			cliDone()
-		end
 		local msg: any = {
 			t = "ran",
 			gen = e.gen,
@@ -98,30 +87,13 @@ local function run(h: Host, e: Effect)
 		}
 		deliver(h, msg)
 	end
-	local function launch()
-		if h.stopped then
-			-- The block closed while this run waited for the slot.
-			if cli then
-				cliDone()
-			end
-			return
-		end
-		local ok, err = pcall(function()
-			tern.process.run(e.argv :: { string }, { cwd = e.cwd, timeout_ms = e.timeoutMs }, function(r: ProcessResult)
-				answer(r.status, r.stdout, r.stderr, r.timed_out)
-			end)
+	local ok, err = pcall(function()
+		tern.process.run(argv, { cwd = e.cwd, timeout_ms = timeout }, function(r: ProcessResult)
+			answer(r.status, r.stdout, r.stderr, r.timed_out)
 		end)
-		if not ok then
-			answer(-1, "", "could not start " .. tostring((e.argv :: { string })[1]) .. ": " .. tostring(err), false)
-		end
-	end
-	if not cli then
-		launch()
-	elseif cliBusy then
-		table.insert(cliWaiting, launch)
-	else
-		cliBusy = true
-		launch()
+	end)
+	if not ok then
+		answer(-1, "", "could not start " .. tostring(argv[1]) .. ": " .. tostring(err), false)
 	end
 end
 
@@ -132,7 +104,7 @@ local function scan(h: Host, e: Effect)
 	local gen = e.gen
 	h.scan = ProjectHost.scan(e.root :: string, nil, function(snapshot, err)
 		local project = if snapshot then Project.build(snapshot) else nil
-		deliver(h, { t = "scanned", gen = gen, project = project, error = err })
+		deliver(h, { t = "scanned", gen = gen, project = project, error = err, now = tern.now() })
 	end)
 end
 
@@ -140,7 +112,7 @@ local function grantImport(h: Host, e: Effect)
 	counter += 1
 	local id = Link.newId(seed, counter)
 	local ok, err = pcall(function()
-		local grant = { request = e.request :: any, label = e.label or "", exp = 0 }
+		local grant = { request = e.request :: any, label = e.label or "", authId = e.authId, exp = 0 }
 		tern.kv.set(Link.GRANTS_KEY, Link.addGrant(tern.kv.get(Link.GRANTS_KEY), id, grant, os.time()))
 		h.cx:open(Link.importUrl(id))
 	end)
@@ -158,7 +130,7 @@ function exec(h: Host, effects: { Effect })
 			return
 		end
 		if e.t == "config" then
-			deliver(h, { t = "config", config = ConfigHost.load().config })
+			deliver(h, { t = "config", config = ConfigHost.load().config, now = tern.now() })
 		elseif e.t == "find" then
 			local gen = e.gen
 			ProjectHost.find(e.cwd :: string, function(root: string?)
@@ -202,11 +174,16 @@ end
 function M.register()
 	tern.block.define("browser", {
 		init = function(cx: BlockCx, args: { string }, saved: any): Host
-			local cwd = args[1]
-			if cwd == nil and type(saved) == "table" and type(saved.cwd) == "string" then
-				cwd = saved.cwd
+			local cwd, held = Link.fromArgs(args)
+			if type(saved) == "table" then
+				if cwd == nil and type(saved.cwd) == "string" then
+					cwd = saved.cwd
+				end
+				if type(saved.held) == "boolean" then
+					held = saved.held
+				end
 			end
-			local s, effects = State.init({ cwd = cwd or cx.cwd })
+			local s, effects = State.init({ cwd = cwd or cx.cwd, held = held })
 			local h: Host = { s = s, cx = cx, stopped = false, warned = false, scan = nil }
 			exec(h, effects)
 			return h

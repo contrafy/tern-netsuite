@@ -8,9 +8,19 @@
 -- `cd <project> && <plugin>/shell/tern-netsuite-guard suitecloud file:upload
 -- --paths <path>` (lib/explorer/upload.luau): the guard core runs it at once
 -- for non-production accounts and asks for approval in Tern otherwise. When
--- the guard core is missing nothing runs.
+-- the guard core is missing nothing runs. The pane first waits in the
+-- project's auth ID's machine-wide CLI slot (cli_slot_host.luau): uploads
+-- run as split panes, out of reach of any plugin VM, so a second upload, an
+-- import or a browser listing for the same auth ID queues there and the
+-- waiting pane says what it waits for.
 
 local lazy = require("./lib/lazy")
+local CliSlot = lazy(function()
+	return require("./lib/sdf/cli_slot")
+end)
+local CliSlotHost = lazy(function()
+	return require("./cli_slot_host")
+end)
 local ConfigHost = require("./config_host")
 local Context = require("./lib/account/context")
 local Link = lazy(function()
@@ -94,8 +104,8 @@ local function launch(cx: WindowCx, pane: number?, owner: Owner, target: Target)
 			string.format(
 				"The deploy guard core %s is missing. Run `cd %s && suitecloud file:upload --paths %s` in a guarded terminal.",
 				guard,
-				Upload().quote(owner.root),
-				Upload().quote(fc)
+				CliSlot().quote(owner.root),
+				CliSlot().quote(fc)
 			)
 		)
 		return
@@ -104,7 +114,7 @@ local function launch(cx: WindowCx, pane: number?, owner: Owner, target: Target)
 		cx:toast("error", "Tern NetSuite: upload refused", owner.root .. "/" .. owner.path .. " is gone; rescan")
 		return
 	end
-	local l, err = Upload().command(owner, guard, target)
+	local l, err = Upload().command(owner, guard, target, CliSlotHost().lock(target.authId))
 	if l == nil then
 		cx:toast("error", "Tern NetSuite: upload refused", err)
 		return

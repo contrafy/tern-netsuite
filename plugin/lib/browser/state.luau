@@ -7,7 +7,14 @@
 -- generation; answers from before a refresh are dropped.
 --
 -- Every CLI call runs in the project directory: CLI 3.2.0 has no --authid on
--- these commands and takes the auth ID from ./project.json.
+-- these commands and takes the auth ID from ./project.json. Account
+-- commands carry `slot` (the auth ID): the host runs them in that auth ID's
+-- machine-wide CLI slot (lib/sdf/cli_slot.luau), which the import pane
+-- takes too.
+--
+-- A block opened from a bare link is `held`: it reads the project and shows
+-- the auth ID and account, but runs no CLI command until the user presses
+-- Enter (the CLI loads the project's suitecloud.config.js).
 
 local Config = require("../config")
 local Diff = require("./diff")
@@ -39,6 +46,10 @@ export type Pending = { token: number, request: Imports.Request, label: string }
 export type State = {
 	gen: number,
 	cwd: string?,
+	-- Waiting for Enter before the first CLI command.
+	held: boolean,
+	-- Latest tern.now() a message carried: the account cache's clock.
+	now: number,
 	config: Config?,
 	-- "finding" until the project root is known, then "scanning", "ready".
 	phase: "finding" | "noproject" | "scanning" | "ready",
@@ -77,15 +88,19 @@ export type Effect = {
 	token: number?,
 	argv: { string }?,
 	timeoutMs: number?,
+	-- run: the auth ID whose CLI slot the command must hold.
+	slot: string?,
 	request: Imports.Request?,
+	-- import: the project's auth ID (its CLI slot).
+	authId: string?,
 	label: string?,
 	path: string?,
 }
 
 export type Msg =
-	{ t: "config", config: Config }
+	{ t: "config", config: Config, now: number? }
 	| { t: "found", gen: number, root: string? }
-	| { t: "scanned", gen: number, project: Project?, error: string? }
+	| { t: "scanned", gen: number, project: Project?, error: string?, now: number? }
 	| {
 		t: "ran",
 		gen: number,
@@ -112,10 +127,12 @@ local function idle(): Load
 	return { status = "idle" }
 end
 
-function M.init(args: { cwd: string? }): (State, { Effect })
+function M.init(args: { cwd: string?, held: boolean? }): (State, { Effect })
 	local s: State = {
 		gen = 1,
 		cwd = args.cwd,
+		held = args.held == true,
+		now = 0,
 		config = nil,
 		phase = "finding",
 		root = nil,
@@ -238,10 +255,14 @@ local function start(s: State, effects: { Effect })
 		return
 	end
 	local authId = s.authId :: string
-	resolveTarget(s, 0)
+	resolveTarget(s, s.now)
+	if s.held then
+		s.objects = idle()
+		return
+	end
 	local cwd = project.root
 	local queue: { Effect } = {}
-	if Resolve.needsLookup(authId, { config = cfg, cache = s.cache, now = 0 }) then
+	if Resolve.needsLookup(authId, { config = cfg, cache = s.cache, now = s.now }) then
 		s.infoLoading = true
 		table.insert(queue, {
 			t = "run",
@@ -260,6 +281,7 @@ local function start(s: State, effects: { Effect })
 		argv = { program(s), "object:list" },
 		cwd = cwd,
 		timeoutMs = timeoutMs(s),
+		slot = authId,
 	})
 	local files: { [string]: Load } = {}
 	for _, folder in s.folders do
@@ -272,6 +294,7 @@ local function start(s: State, effects: { Effect })
 			argv = { program(s), "file:list", "--folder", folder },
 			cwd = cwd,
 			timeoutMs = timeoutMs(s),
+			slot = authId,
 		})
 	end
 	s.files = files
@@ -347,15 +370,16 @@ end
 local function startImport(s: State, request: Imports.Request, forced: boolean, effects: { Effect })
 	local project = s.project :: Project
 	local label = project.name .. " <- " .. targetLabel(s)
-	table.insert(effects, { t = "import", gen = s.gen, request = request, label = label })
+	table.insert(effects, { t = "import", gen = s.gen, request = request, authId = s.authId, label = label })
 	local what = request.scriptId or request.path or "?"
 	s.message = {
 		tone = if forced then "warning" else "info",
 		text = string.format(
-			"Importing %s into %s in a split below%s; press r to refresh when it finishes",
+			"Importing %s into %s in a split below%s; it waits while another SuiteCloud command uses %s, press r to refresh when it finishes",
 			what,
 			project.name,
-			if forced then " (forced: local changes may be overwritten)" else ""
+			if forced then " (forced: local changes may be overwritten)" else "",
+			s.authId or "the auth ID"
 		),
 	}
 end
@@ -476,7 +500,12 @@ local function key(s: State, msg: any, effects: { Effect }): boolean
 	end
 	local name = msg.name
 	local n = #M.visible(s)
-	if name == "escape" then
+	if s.held and (name == "enter" or name == "return") then
+		if s.phase == "ready" and s.authId then
+			s.held = false
+			start(s, effects)
+		end
+	elseif name == "escape" then
 		if s.filter.query ~= "" then
 			setFilter(s, { where = s.filter.where, type = s.filter.type, query = "" })
 		else
@@ -569,6 +598,9 @@ function M.update(prev: State, msg: Msg): (State, { Effect })
 	local s = copy(prev)
 	local effects: { Effect } = {}
 	local m: any = msg
+	if type(m.now) == "number" then
+		s.now = m.now
+	end
 	if m.t == "config" then
 		s.config = m.config
 		start(s, effects)
@@ -631,9 +663,10 @@ function M.update(prev: State, msg: Msg): (State, { Effect })
 	return s, effects
 end
 
--- What `save` persists: enough to reopen on the same directory.
-function M.saved(s: State): { cwd: string? }
-	return { cwd = s.cwd }
+-- What `save` persists: enough to reopen on the same directory, still
+-- waiting for Enter when it was.
+function M.saved(s: State): { cwd: string?, held: boolean }
+	return { cwd = s.cwd, held = s.held }
 end
 
 return M

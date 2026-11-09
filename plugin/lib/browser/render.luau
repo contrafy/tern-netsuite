@@ -15,8 +15,10 @@ type Entry = Diff.Entry
 
 local M = {}
 
--- Rows drawn at most; the scrolling list shows what fits the pane.
-M.MAX_ROWS = 300
+-- Rows drawn at most; the scrolling list shows what fits the pane. Tern
+-- virtualizes a list past 200 children and then renders only `item` props,
+-- so the rows (text nodes with click actions) must stay at or under 200.
+M.MAX_ROWS = 200
 
 local WHERE_LABEL: { [string]: string } = { account = "account", both = "both", ["local"] = "local" }
 local WHERE_STYLE: { [string]: string } = { account = "success", both = "muted", ["local"] = "warning" }
@@ -183,6 +185,44 @@ local function listNodes(s: State): { Node }
 	return out
 end
 
+-- A block opened from a bare link: what Enter would list, nothing run yet.
+local function heldNodes(s: State): { Node }
+	local t = s.target
+	local account: string
+	if t == nil or t.source == "unknown" then
+		account =
+			"not in the config: the CLI is asked (account:manageauth --info) after Enter; unknown accounts count as production"
+	else
+		local id = t.accountId or t.label
+		local notes: { string } = {}
+		if t.label ~= id then
+			table.insert(notes, t.label)
+		end
+		if t.production then
+			table.insert(notes, "production")
+		end
+		account = id .. (if #notes > 0 then " (" .. table.concat(notes, ", ") .. ")" else "")
+	end
+	local root = s.root or "?"
+	return {
+		ui.text({
+			ui.span("Opened from a link: nothing has run yet.", "warning strong"),
+		}, { key = "held" }),
+		ui.text({ ui.span("Project  ", "muted"), ui.span(root, "code") }, { key = "held-root" }),
+		ui.text({ ui.span("Auth ID  ", "muted"), ui.span(s.authId or "?", "code") }, { key = "held-auth" }),
+		ui.text({ ui.span("Account  ", "muted"), account }, { key = "held-account" }),
+		ui.text({
+			ui.span("Press Enter", "strong"),
+			ui.span(
+				" to list this account with the SuiteCloud CLI (it loads "
+					.. root
+					.. "/suitecloud.config.js), or q to close.",
+				"muted"
+			),
+		}, { key = "held-how" }),
+	}
+end
+
 local function dock(s: State): Node
 	local children: { Node } = {}
 	local m = s.message
@@ -190,8 +230,9 @@ local function dock(s: State): Node
 		table.insert(children, ui.text({ ui.span(m.text, m.tone) }, { key = "message" }))
 	end
 	local scripts = if s.excludeFiles then "scripts excluded" else "scripts included"
-	local keys: { ui.SpanLike } = if s.editing
-		then {
+	local keys: { ui.SpanLike } = if s.held
+		then { ui.span("enter", "key"), " list the account  ", ui.span("q", "key"), " close" }
+		elseif s.editing then {
 			ui.span("enter", "key"),
 			" done  ",
 			ui.span("esc", "key"),
@@ -249,6 +290,10 @@ function M.view(s: State): { main: Node, dock: Node }
 				),
 			}, { key = "noauth" })
 		)
+	elseif s.held then
+		for _, n in heldNodes(s) do
+			table.insert(children, n)
+		end
 	else
 		for _, n in errors(s) do
 			table.insert(children, n)

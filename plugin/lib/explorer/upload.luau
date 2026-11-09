@@ -6,10 +6,16 @@
 -- production or unknown ones, failing closed. The account resolved here only
 -- labels the pane; the guard resolves it again itself.
 --
+-- The pane waits in the auth ID's machine-wide CLI slot
+-- (lib/sdf/cli_slot.luau) before the guard starts, so a second upload or a
+-- browser listing for the same auth ID never runs beside it; the pane says
+-- what it waits for. The slot is held through the guard's approval.
+--
 -- The SuiteCloud CLI reads project.json from its working directory only and
 -- `file:upload` has no --authid or --project option (CLI 3.2.0), so the pane
 -- must `cd` into the project root.
 
+local CliSlot = require("../sdf/cli_slot")
 local Resolve = require("../account/resolve")
 local Symlinks = require("../sdf/symlinks")
 
@@ -80,19 +86,6 @@ function M.target(authId: string?, opts: Resolve.Options): Target
 	}
 end
 
--- One POSIX shell word: bare when it has only safe characters, else single
--- quoted with each ' written as '\''.
-function M.quote(s: string): string
-	if s ~= "" and string.find(s, "^[%w%-_%./:=@+,]+$") then
-		return s
-	end
-	return "'" .. string.gsub(s, "'", "'\\''") .. "'"
-end
-
-local function printable(s: string): string
-	return (string.gsub(s, "%c", "?"))
-end
-
 local function badPath(path: string, what: string): string?
 	if string.sub(path, 1, 1) ~= "/" then
 		return what .. " is not absolute"
@@ -108,7 +101,9 @@ local function badPath(path: string, what: string): string?
 	return nil
 end
 
-function M.command(owner: Owner, guard: string, target: Target): (Launch?, string?)
+-- The upload pane of `owner`'s file, waiting in the CLI slot `lock` (see
+-- CliSlotHost.lock) of the project's auth ID.
+function M.command(owner: Owner, guard: string, target: Target, lock: string): (Launch?, string?)
 	local fc = owner.fileCabinetPath
 	if fc == nil then
 		return nil, owner.path .. " is not a File Cabinet file"
@@ -122,38 +117,28 @@ function M.command(owner: Owner, guard: string, target: Target): (Launch?, strin
 			"the SuiteCloud CLI wraps --paths in double quotes and cannot upload a path containing a double quote"
 	end
 	local argv = { guard, "suitecloud", "file:upload", "--paths", fc }
-	local quoted: { string } = {}
-	for i, w in argv do
-		quoted[i] = M.quote(w)
-	end
 	local title = string.format(
 		"tern-netsuite upload %s -> %s%s",
-		printable(fc),
-		printable(target.label),
+		fc,
+		target.label,
 		if target.production then " (production: approval required)" else ""
 	)
-	local script = table.concat({
-		"printf '\\033]0;%s\\007' " .. M.quote(title),
-		"printf 'tern-netsuite: %s\\n' " .. M.quote(
-			string.format(
-				"uploading %s from %s to %s",
-				printable(fc),
-				printable(owner.project),
-				printable(target.label)
-			)
-		),
-		"cd " .. M.quote(owner.root) .. " && " .. table.concat(quoted, " "),
-		"s=$?",
-		"printf '\\ntern-netsuite: file:upload exited %s; press Enter to close\\n' \"$s\"",
-		"read -r _",
-		'exit "$s"',
-	}, "; ")
+	local script, err = CliSlot.paneScript({
+		title = title,
+		intro = string.format("uploading %s from %s to %s", fc, owner.project, target.label),
+		cwd = owner.root,
+		lock = lock,
+		argv = argv,
+	})
+	if script == nil then
+		return nil, (err or "") .. "; upload it from a terminal"
+	end
 	return {
 		argv = argv,
 		cwd = owner.root,
 		script = script,
-		line = "sh -c " .. M.quote(script),
-		title = title,
+		line = CliSlot.paneLine(script),
+		title = CliSlot.printable(title),
 	},
 		nil
 end

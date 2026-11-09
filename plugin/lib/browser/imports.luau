@@ -1,11 +1,13 @@
 --!strict
 -- `object:import` / `file:import` of one browser entry into the project:
--- the argv (CLI 3.2.0 non-interactive flags), the shell line shown in the
--- split pane, the local paths the import may overwrite and the git check
--- that refuses to overwrite uncommitted work. Imports read the account and
--- write only local files (object:import replaces a local object and, unless
--- --excludefiles, the script files it references).
+-- the argv (CLI 3.2.0 non-interactive flags), the split pane that runs it
+-- in the auth ID's CLI slot (lib/sdf/cli_slot.luau), the local paths the
+-- import may overwrite and the git check that refuses to overwrite
+-- uncommitted work. Imports read the account and write only local files
+-- (object:import replaces a local object and, unless --excludefiles, the
+-- script files it references).
 
+local CliSlot = require("../sdf/cli_slot")
 local Diff = require("./diff")
 local Project = require("../sdf/project")
 
@@ -108,6 +110,15 @@ local function plainPath(p: string): boolean
 	return true
 end
 
+-- A word of the pane's shell line: refused when the shell (fish reads \'
+-- inside single quotes as a quote) could split it differently.
+local function lineSafe(what: string, s: string): string?
+	local why = CliSlot.unsafe(s)
+	return if why
+		then what .. " " .. why .. ", which cannot be passed safely through a shell line; import it in a terminal"
+		else nil
+end
+
 -- Why the request cannot run, or nil.
 function M.validate(r: Request): string?
 	if string.sub(r.root, 1, 1) ~= "/" or not plainPath(r.root) then
@@ -115,6 +126,10 @@ function M.validate(r: Request): string?
 	end
 	if not clean(r.projectFolder) or string.find(r.projectFolder, "..", 1, true) then
 		return "the project folder is not a plain folder name"
+	end
+	local unsafe = lineSafe("the project root", r.root) or lineSafe("the project folder", r.projectFolder)
+	if unsafe then
+		return unsafe
 	end
 	if r.kind == "object" then
 		local ty, id, dest = r.type, r.scriptId, r.destinationFolder
@@ -127,17 +142,17 @@ function M.validate(r: Request): string?
 		if dest == nil or not plainPath(dest) or not (dest == M.OBJECTS or string.sub(dest, 1, 9) == "/Objects/") then
 			return "the destination must be a folder under /Objects"
 		end
-		return nil
+		return lineSafe("the destination folder", dest)
 	end
 	local path = r.path
 	if path == nil or not plainPath(path) or string.sub(path, -1) == "/" then
 		return "the File Cabinet path must be absolute, like /SuiteScripts/x.js"
 	end
-	return nil
+	return lineSafe("the File Cabinet path", path)
 end
 
 function M.argv(program: string, r: Request): ({ string }?, string?)
-	local err = M.validate(r)
+	local err = M.validate(r) or lineSafe("the configured CLI program (suitecloud.program)", program)
 	if err then
 		return nil, err
 	end
@@ -160,19 +175,44 @@ function M.argv(program: string, r: Request): ({ string }?, string?)
 	return { program, "file:import", "--paths", r.path :: string }, nil
 end
 
-function M.quote(s: string): string
-	if s ~= "" and string.match(s, "^[%w%._/:@%-=+,]+$") then
-		return s
-	end
-	return "'" .. string.gsub(s, "'", "'\\''") .. "'"
-end
-
 function M.commandLine(argv: { string }): string
 	local words: { string } = table.create(#argv)
 	for i, w in argv do
-		words[i] = M.quote(w)
+		words[i] = CliSlot.quote(w)
 	end
 	return table.concat(words, " ")
+end
+
+export type Launch = {
+	argv: { string },
+	cwd: string,
+	-- The pane's POSIX script; `line` is `sh -c <script>`.
+	script: string,
+	line: string,
+	title: string,
+}
+
+-- The split pane that imports `r`: it waits for the CLI slot `lock` (see
+-- CliSlotHost.lock), runs the import in the project root and keeps the
+-- output open until Enter.
+function M.launch(program: string, r: Request, lock: string): (Launch?, string?)
+	local argv, err = M.argv(program, r)
+	if argv == nil then
+		return nil, err
+	end
+	local what = r.scriptId or r.path or "?"
+	local title = "tern-netsuite import " .. what
+	local script, why = CliSlot.paneScript({
+		title = title,
+		intro = "importing " .. what .. " into " .. r.root .. ": " .. M.commandLine(argv),
+		cwd = r.root,
+		lock = lock,
+		argv = argv,
+	})
+	if script == nil then
+		return nil, why
+	end
+	return { argv = argv, cwd = r.root, script = script, line = CliSlot.paneLine(script), title = title }, nil
 end
 
 -- Project paths (relative to root) the import may write. An account-only

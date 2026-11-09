@@ -5,10 +5,14 @@
 
 local BrowserWindow = require("./browser_window")
 local ConfigHost = require("./config_host")
+local ConsoleWindow = require("./console_window")
+local DeploymentsWindow = require("./deployments_window")
+local DriftWindow = require("./drift_window")
 local ExplorerWindow = require("./explorer_window")
 local GuardWindow = require("./guard_window")
 local HealthWindow = require("./health_window")
 local HistoryWindow = require("./history_window")
+local InspectorWindow = require("./inspector_window")
 local LogsWindow = require("./logs_window")
 local NsWindow = require("./ns_window")
 local ScaffoldWindow = require("./scaffold_window")
@@ -27,6 +31,10 @@ local routes: { [string]: Route } = {
 	explorer = ExplorerWindow.route,
 	history = HistoryWindow.route,
 	browser = BrowserWindow.route,
+	console = ConsoleWindow.route,
+	inspect = InspectorWindow.route,
+	deployments = DeploymentsWindow.route,
+	drift = DriftWindow.route,
 }
 
 -- Every tern-netsuite:// URL must be claimed here: an unclaimed one, or a
@@ -111,3 +119,7 @@ ExplorerWindow.register()
 HistoryWindow.register()
 StatusWindow.addProvider(HistoryWindow.ciSegment)
 BrowserWindow.register()
+ConsoleWindow.register()
+InspectorWindow.register()
+DeploymentsWindow.register()
+DriftWindow.register()

@@ -54,6 +54,26 @@ id = "browser"
 title = "NetSuite Browser"
 icon = "cloud"
 
+[[blocks]]
+id = "console"
+title = "SuiteQL Console"
+icon = "cloud"
+
+[[blocks]]
+id = "inspect"
+title = "NetSuite Record"
+icon = "cloud"
+
+[[blocks]]
+id = "deployments"
+title = "NetSuite Deployments"
+icon = "cloud"
+
+[[blocks]]
+id = "drift"
+title = "NetSuite Drift"
+icon = "cloud"
+
 # Globs see the program basename plus its args after Tern strips `npx` and its
 # options, `VAR=` prefixes, `command` and directories, so no `npx` forms are
 # needed. The lens re-derives the command from argv and shows raw output for

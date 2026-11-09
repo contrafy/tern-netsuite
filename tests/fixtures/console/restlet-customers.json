@@ -1,0 +1,1 @@
+{"ok":true,"rows":[{"id":101,"companyname":"Acme Corp","balance":1250.5,"email":null,"isinactive":false},{"id":102,"companyname":"Acme Freight","balance":0,"email":"ap@freight.example.com","isinactive":true}],"count":2}

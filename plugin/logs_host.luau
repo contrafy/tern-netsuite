@@ -9,10 +9,15 @@
 -- chain; late query results of a closed block are ignored.
 
 local ConfigHost = require("./config_host")
+local InspectLink = require("./lib/inspector/link")
 local NsHost = require("./ns_host")
 local Pane = require("./lib/pane")
 local State = require("./lib/monitor/logs/state")
 local View = require("./lib/monitor/logs/view")
+
+-- Inspect chips open the inspector through single-use start grants.
+local seed = string.format("logs:%d:%.6f:%.17g:%s", os.time(), os.clock(), math.random(), tostring({}))
+local counter = 0
 
 local log = tern.log
 
@@ -119,6 +124,19 @@ function exec(h: Host, effects: { State.Effect })
 			-- window.luau routes tern-netsuite://logs/connect to the connect block.
 			pcall(function()
 				h.cx:open(e.url or "")
+			end)
+		elseif e.t == "inspect" then
+			-- A start grant: the user clicked our own chip, so the inspector
+			-- reads at once (window.luau routes tern-netsuite://inspect).
+			pcall(function()
+				counter += 1
+				local id = InspectLink.newId(seed, counter)
+				local url, grants =
+					InspectLink.grantStart(e.url or "", tern.kv.get(InspectLink.GRANTS_KEY), id, os.time())
+				if url and grants then
+					tern.kv.set(InspectLink.GRANTS_KEY, grants)
+					h.cx:open(url)
+				end
 			end)
 		elseif e.t == "save" then
 			pcall(function()

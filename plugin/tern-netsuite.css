@@ -36,11 +36,25 @@
 	min-height: min(16.5em, 100%);
 }
 
+.sf-main[data-surface="plugin.tern-netsuite.inspect"] {
+	min-height: min(12em, 100%);
+}
+
 .sf-dock[data-surface="plugin.tern-netsuite.explorer"],
 .sf-dock[data-surface="plugin.tern-netsuite.browser"],
 .sf-dock[data-surface="plugin.tern-netsuite.history"],
-.sf-dock[data-surface="plugin.tern-netsuite.logs"] {
+.sf-dock[data-surface="plugin.tern-netsuite.logs"],
+.sf-dock[data-surface="plugin.tern-netsuite.inspect"] {
 	flex-shrink: 1;
 	min-height: 0;
 	overflow: hidden;
+}
+
+/* The inspector's rows stay on one line whatever width Tern reports (0.9.13
+   gives blocks 80x24 and no resize): long values end in an ellipsis and the
+   dock shows the selected value in full. */
+.sf-main[data-surface="plugin.tern-netsuite.inspect"] > .sf-list[data-role="tern-netsuite.scroll"] .sf-text {
+	white-space: pre;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }

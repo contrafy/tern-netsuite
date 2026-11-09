@@ -1,0 +1,17 @@
+[
+  {
+    "links": [],
+    "id": "123",
+    "tranid": "SO-1001",
+    "type": "SalesOrd",
+    "trandate": "10/8/2026",
+    "entity": "42",
+    "createdfrom": null,
+    "subsidiary": "1",
+    "memo": "Acme storefront order\nsecond line",
+    "status": "B",
+    "custbody_acme_channel": "storefront",
+    "custbody_acme_box": "5",
+    "custbody_acme_empty": ""
+  }
+]

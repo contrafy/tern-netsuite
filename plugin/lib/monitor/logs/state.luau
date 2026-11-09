@@ -16,7 +16,9 @@ local Detail = require("./detail")
 local Entry = require("./entry")
 local Errors = require("../../ns/errors")
 local Filter = require("./filter")
+local InspectLink = require("../../inspector/link")
 local Link = require("./link")
+local Mention = require("../../inspector/mention")
 local Query = require("./query")
 
 type Entry = Entry.Entry
@@ -41,7 +43,7 @@ export type Env = {
 }
 
 export type Effect = {
-	t: "query" | "timer" | "focus" | "open" | "save" | "exit",
+	t: "query" | "timer" | "focus" | "open" | "inspect" | "save" | "exit",
 	req: number?,
 	connection: string?,
 	sql: string?,
@@ -179,6 +181,16 @@ function M.detail(s: State): Detail.Parsed?
 		return nil
 	end
 	return s.parsed.p
+end
+
+-- The record the selected row's title or detail mentions (a NetSuite URL,
+-- a JSON type and id, a `type:id` token), or nil.
+function M.mention(s: State): Mention.Ref?
+	local e = M.selected(s)
+	if e == nil then
+		return nil
+	end
+	return Mention.find({ e.title, e.detail })
 end
 
 function M.error(s: State): NsError?
@@ -377,6 +389,24 @@ end
 
 -- Commands ----------------------------------------------------------------------
 
+-- Asks the host to open the inspector (through a start grant) on the
+-- record the selected row mentions.
+local function inspectRecord(s: State, effects: { Effect })
+	local r, tg = M.mention(s), M.target(s)
+	if r == nil or tg == nil then
+		return
+	end
+	table.insert(effects, {
+		t = "inspect",
+		url = InspectLink.url({
+			connection = tg.id,
+			type = if r.kind then r.kind.record else nil,
+			id = r.id,
+			rectype = if r.kind then nil else r.rectype,
+		}),
+	})
+end
+
 local function move(s: State, delta: number)
 	local list = M.visible(s)
 	if #list == 0 then
@@ -537,6 +567,9 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 		return selectTarget(s, s.selected % #s.targets + 1, effects)
 	elseif ch == "r" then
 		reload(s, effects)
+	elseif ch == "i" then
+		inspectRecord(s, effects)
+		return false
 	else
 		return false
 	end
@@ -579,6 +612,9 @@ local function onAction(s: State, act: string, value: string, effects: { Effect 
 				return selectTarget(s, i, effects)
 			end
 		end
+		return false
+	elseif act == "inspect" then
+		inspectRecord(s, effects)
 		return false
 	elseif act == "connect" then
 		local tg = M.target(s)

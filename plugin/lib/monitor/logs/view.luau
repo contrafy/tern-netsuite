@@ -304,7 +304,23 @@ local function dock(s: State): Node?
 		end
 		table.insert(body, ui.code(raw, nil, nil, { key = "draw" }))
 	end
-	table.insert(body, ui.muted("enter closes · j/k move", { key = "dhint" }))
+	local mention = State.mention(s)
+	if mention then
+		local what = if mention.kind then mention.kind.label else "Custom record"
+		table.insert(
+			body,
+			ui.row({ chip(string.format("Inspect %s #%s", what, mention.id), "accent", "inspect", "inspect") }, {
+				key = "dinspect",
+			})
+		)
+	end
+	table.insert(
+		body,
+		ui.muted(
+			if mention then "enter closes · j/k move · i inspects" else "enter closes · j/k move",
+			{ key = "dhint" }
+		)
+	)
 	return ui.col(body, { key = "detail" })
 end
 

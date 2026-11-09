@@ -1,0 +1,5 @@
+[
+  { "links": [], "line": "301", "seq": "1", "item": "7", "itemname": "Acme widget", "quantity": "2", "amount": "-40.00", "memo": null },
+  { "links": [], "line": "302", "seq": "2", "item": "8", "itemname": "Acme gadget", "quantity": "1", "amount": "-15.50", "memo": "gift wrap" },
+  { "links": [], "line": "303", "seq": "3", "item": "7", "itemname": "Acme widget", "quantity": "1", "amount": "-20.00", "memo": null }
+]

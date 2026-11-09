@@ -1,0 +1,4 @@
+[
+  { "links": [], "scriptid": "custbody_acme_channel", "label": "Sales channel", "reftype": null },
+  { "links": [], "scriptid": "custbody_acme_box", "label": "Shipping box", "reftype": "customrecord_acme_box" }
+]

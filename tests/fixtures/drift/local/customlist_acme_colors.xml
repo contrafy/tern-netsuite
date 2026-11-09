@@ -1,0 +1,19 @@
+<customlist scriptid="customlist_acme_colors">
+  <description></description>
+  <isinactive>F</isinactive>
+  <ismatrixoption>F</ismatrixoption>
+  <isordered>T</isordered>
+  <name>Acme Colors</name>
+  <customvalues>
+    <customvalue scriptid="val_acme_color_red">
+      <abbreviation>R</abbreviation>
+      <isinactive>F</isinactive>
+      <value>Red</value>
+    </customvalue>
+    <customvalue scriptid="val_acme_color_teal">
+      <abbreviation>T</abbreviation>
+      <isinactive>F</isinactive>
+      <value>Teal</value>
+    </customvalue>
+  </customvalues>
+</customlist>

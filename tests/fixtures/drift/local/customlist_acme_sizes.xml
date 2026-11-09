@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customlist scriptid='customlist_acme_sizes'>
+    <description/>
+    <isinactive>F</isinactive>
+    <ismatrixoption>T</ismatrixoption>
+    <isordered>T</isordered>
+    <name>Acme Sizes</name>
+    <!-- sizes sold by the storefront -->
+    <customvalues>
+        <customvalue scriptid="val_acme_size_s">
+            <abbreviation>S</abbreviation>
+            <isinactive>F</isinactive>
+            <value>Small &amp; "Petite"</value>
+        </customvalue>
+        <customvalue scriptid="val_acme_size_m">
+            <abbreviation>M</abbreviation>
+            <isinactive>F</isinactive>
+            <value>Medium</value>
+        </customvalue>
+    </customvalues>
+</customlist>

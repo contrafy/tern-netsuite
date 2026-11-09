@@ -1,0 +1,6 @@
+The imported objects will overwrite the project objects
+[2K[1GThe following objects have been imported:
+    - customlist:customlist_acme_sizes
+    - customlist:customlist_acme_colors
+The following objects have not been imported:
+    - customlist:customlist_acme_missing failed: Record does not exist.

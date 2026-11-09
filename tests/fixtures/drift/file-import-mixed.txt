@@ -1,0 +1,6 @@
+The imported files will overwrite the project files
+[2K[1GThe following files were imported:
+/SuiteScripts/acme/acme_orders_ue.js
+/SuiteScripts/acme/Acme Shared/acme_lib.js
+The following files were not imported:
+/SuiteScripts/acme/acme_missing.js, INVALID FILE PATH: /SuiteScripts/acme/acme_missing.js

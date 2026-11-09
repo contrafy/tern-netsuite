@@ -59,13 +59,12 @@ local function writeFile(dir: string, path: string, text: string): string?
 	return if ok then nil else tostring(err)
 end
 
-local fs: Library.Fs = {
-	list = function(dir: string): { string }?
-		local ok, names = pcall(tern.fs.list, dir)
-		return if ok and type(names) == "table" then names else nil
-	end,
-	read = readFile,
-}
+local function listDir(dir: string): { string }?
+	local ok, names = pcall(tern.fs.list, dir)
+	return if ok and type(names) == "table" then names else nil
+end
+
+local folderIo = Library.io(listDir, readFile, tern.process.run :: any)
 
 local function loadSaved(): { Store.Saved }
 	return Store.parseSaved(readFile(dataDir() .. "/" .. Store.SAVED_FILE, Store.MAX_FILE_BYTES), tern.json.decode)
@@ -147,8 +146,16 @@ end
 
 local function list(h: Host, e: State.Effect)
 	local dirs = ConfigHost.current().console.saved_dirs
-	local files, problems = Library.gather(fs, exists, dirs, e.cwd or h.cx.cwd, tern.getenv("HOME"))
-	dispatch(h, { t = "listed", saved = loadSaved(), files = files, problems = problems })
+	local waiting = false
+	Library.gather(folderIo, exists, dirs, e.cwd or h.cx.cwd, tern.getenv("HOME"), function(files, problems)
+		dispatch(h, { t = "listed", saved = loadSaved(), files = files, problems = problems })
+		-- Folders are walked in a process; its answer comes after the
+		-- update that asked, which renders nothing then.
+		if waiting then
+			rerender(h)
+		end
+	end)
+	waiting = true
 end
 
 local function readQuery(h: Host, e: State.Effect)
@@ -193,7 +200,7 @@ end
 
 -- Removes all but the newest KEEP_VIEWED result files.
 local function prune(dir: string)
-	local names = fs.list(dir)
+	local names = listDir(dir)
 	if names == nil then
 		return
 	end

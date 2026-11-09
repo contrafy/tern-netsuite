@@ -72,22 +72,17 @@ local function readFile(path: string, max: number): string?
 	return if ok and type(text) == "string" then text else nil
 end
 
-local fs = {
-	list = function(dir: string): { string }?
-		local ok, names = pcall(tern.fs.list, dir)
-		return if ok and type(names) == "table" then names else nil
-	end,
-	read = readFile,
-}
+local function listDir(dir: string): { string }?
+	local ok, names = pcall(tern.fs.list, dir)
+	return if ok and type(names) == "table" then names else nil
+end
 
-local function pickQuery(cx: WindowCx, cwd: string?)
+local function showPicker(cx: WindowCx, cwd: string?, files: { any }, problems: { string }, omitted: number)
 	local store = Store()
 	local saved = store.parseSaved(
 		readFile(tern.plugin.data .. "/" .. store.DIR .. "/" .. store.SAVED_FILE, store.MAX_FILE_BYTES),
 		tern.json.decode
 	)
-	local files, problems =
-		Library().gather(fs, exists, ConfigHost.current().console.saved_dirs, cwd, tern.getenv("HOME"))
 	local items = Library().items(saved, files)
 	if #items == 0 then
 		cx:toast(
@@ -99,17 +94,7 @@ local function pickQuery(cx: WindowCx, cwd: string?)
 		)
 		return
 	end
-	local choices: { { [string]: any } } = {}
-	for _, it in items do
-		table.insert(choices, {
-			label = it.label,
-			detail = it.detail,
-			group = if it.kind == "saved" then "Saved queries" else "Query folders",
-			icon = if it.kind == "saved" then "database" else "code",
-			name = it.name,
-			path = it.path,
-		})
-	end
+	local choices = Library().choices(items, omitted)
 	local picker = (cx :: any) :: Picker
 	picker
 		:pick({ items = choices, placeholder = "Run a saved query or .sql file", icon = "database", action = "run" })
@@ -127,6 +112,22 @@ local function pickQuery(cx: WindowCx, cwd: string?)
 				open(at, { cwd = cwd, saved = choice.name, run = true })
 			end
 		end)
+end
+
+local function pickQuery(cx: WindowCx, cwd: string?)
+	local at = cx
+	Library().gather(
+		Library().io(listDir, readFile, tern.process.run :: any, function(fresh: WindowCx?)
+			at = fresh or at
+		end),
+		exists,
+		ConfigHost.current().console.saved_dirs,
+		cwd,
+		tern.getenv("HOME"),
+		function(files, problems, omitted)
+			showPicker(at, cwd, files, problems, omitted)
+		end
+	)
 end
 
 -- Handles `tern-netsuite://console...`; window.luau dispatches area

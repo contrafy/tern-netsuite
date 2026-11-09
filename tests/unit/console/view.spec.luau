@@ -190,6 +190,29 @@ describe("console view", function()
 		expect(shown).toContain("email null   null")
 		expect(find(dock, "insp1").p.text).toBe("Inspect customer 101")
 	end)
+
+	it("lists folder files by their path in the folder, the folder when several, and what was not listed", function()
+		local s = State.update(start(), { t = "key", key = key("o", "o", { ctrl = true }) })
+		s = State.update(s, {
+			t = "listed",
+			saved = {},
+			files = {
+				{ path = "/tmp/acme/sql/orders/open.sql", name = "open.sql", rel = "orders/open.sql", folder = "sql" },
+				{
+					path = "/Users/demo/team/c.sql",
+					name = "c.sql",
+					rel = "c.sql",
+					title = "Customers",
+					folder = "~/team",
+				},
+			},
+			problems = { "3 more .sql files not listed: only the first 500 are" },
+		})
+		local main = View.view(s).main
+		expect(text(find(main, "p1"))).toBe("›  file    open.sql   orders/open.sql   in sql")
+		expect(text(find(main, "p2"))).toBe("   file    Customers   c.sql   in ~/team")
+		expect(text(find(main, "pp1"))).toBe("3 more .sql files not listed: only the first 500 are")
+	end)
 end)
 
 return nil

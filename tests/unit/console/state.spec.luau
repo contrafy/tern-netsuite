@@ -312,7 +312,9 @@ describe("console saved queries", function()
 		s = send(s, {
 			t = "listed",
 			saved = { { name = "Open orders", sql = "SELECT id FROM transaction", at = 5 } },
-			files = { { path = "/tmp/acme/sql/c.sql", name = "c.sql", title = "Customers", folder = "sql" } },
+			files = {
+				{ path = "/tmp/acme/sql/c.sql", name = "c.sql", rel = "c.sql", title = "Customers", folder = "sql" },
+			},
 			problems = {},
 		})
 		local loaded
@@ -329,7 +331,7 @@ describe("console saved queries", function()
 		s = send(s, {
 			t = "listed",
 			saved = { { name = "Mine", sql = "SELECT 1", at = 1 } },
-			files = { { path = "/tmp/acme/sql/c.sql", name = "c.sql", folder = "sql" } },
+			files = { { path = "/tmp/acme/sql/c.sql", name = "c.sql", rel = "c.sql", folder = "sql" } },
 		})
 		local _, effects = press(s, key("d", "d", { ctrl = true }))
 		expect(only(effects, "delete")).toEqual({ t = "delete", name = "Mine" })

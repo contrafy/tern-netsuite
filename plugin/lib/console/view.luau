@@ -384,15 +384,16 @@ local function picker(p: State.Picker): { Node }
 	for i = first, last do
 		local it = list[i]
 		local on = i == sel
-		table.insert(
-			lines,
-			ui.text({
-				ui.span(if on then "› " else "  ", "accent"),
-				ui.span(if it.kind == "saved" then "saved  " else "file   ", "muted"),
-				ui.span(it.label, if on then "strong" else nil),
-				ui.span("  " .. it.detail, "muted"),
-			}, { key = "p" .. i, actions = { click = "pick=" .. i } })
-		)
+		local spans = {
+			ui.span(if on then "› " else "  ", "accent"),
+			ui.span(if it.kind == "saved" then "saved  " else "file   ", "muted"),
+			ui.span(it.label, if on then "strong" else nil),
+			ui.span("  " .. it.detail, "muted"),
+		}
+		if it.folder then
+			table.insert(spans, ui.span("  in " .. it.folder, "muted"))
+		end
+		table.insert(lines, ui.text(spans, { key = "p" .. i, actions = { click = "pick=" .. i } }))
 	end
 	table.insert(out, ui.scroll("picks", lines, "p" .. sel, State.MAX_RENDER_ROWS))
 	return out

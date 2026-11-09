@@ -177,11 +177,30 @@ local function tabs(s: State): Node
 end
 
 local function fieldLabel(cur: State.Inspection, column: string): (string, string?)
-	local meta = cur.labels[column]
-	if meta then
-		return meta.label, column
+	local label = State.label(cur, column)
+	if label then
+		return label, column
 	end
 	return column, nil
+end
+
+-- Where the standard field labels come from, or why there are none.
+local function labelSource(cur: State.Inspection): Node?
+	if cur.errs.std or cur.pending.std then
+		return nil
+	end
+	if cur.stdNote then
+		return ui.muted(cur.stdNote :: string, { key = "stdnote" })
+	end
+	if cur.stdFetched == nil then
+		return nil
+	end
+	local text = string.format(
+		"Standard labels: NetSuite's metadata catalog, fetched %s%s · l refreshes",
+		os.date("%Y-%m-%d", cur.stdFetched :: number),
+		if cur.stdCached then " (cached)" else ""
+	)
+	return ui.text({ ui.span(text, "muted") }, { key = "stdsrc", actions = { click = "labels" } })
 end
 
 local function fieldRow(s: State, cur: State.Inspection, f: Record.Field, i: number, selected: boolean): Node
@@ -241,23 +260,32 @@ local function listNodes(s: State, cur: State.Inspection): { Node }
 	local tab = s.tab
 	local n = State.count(s, tab)
 	local errParts: { string } = if tab == "fields"
-		then { "labels-plain" }
+		then { "std", "labels-plain" }
 		elseif tab == "notes" then { "notes" }
 		else { "display", "lines", "children", "txns" }
 	for _, part in errParts do
 		local e = cur.errs[part]
 		if e then
-			local what = if part == "labels-plain"
-				then "Custom field labels are unavailable"
+			local what = if part == "std"
+				then "Standard field labels are unavailable (column names shown)"
+				elseif part == "labels-plain" then "Custom field labels are unavailable"
 				elseif part == "display" then "Display names are unavailable"
 				elseif part == "lines" then "Transaction lines could not be read"
 				elseif part == "notes" then "System notes could not be read"
 				else "Linked transactions could not be read"
 			table.insert(out, ui.text({ ui.span(what .. ": ", "warning"), ui.span(e.message) }, { key = "e" .. part }))
-			local h = hint(e)
+			local h = if part == "std" and e.kind == "permission"
+				then "Field labels need the role's REST Web Services permission; press l to try again."
+				else hint(e)
 			if h then
 				table.insert(out, ui.muted(h, { key = "h" .. part }))
 			end
+		end
+	end
+	if tab == "fields" then
+		local src = labelSource(cur)
+		if src then
+			table.insert(out, src)
 		end
 	end
 	if tab == "notes" and cur.notice then
@@ -342,8 +370,8 @@ local function dock(s: State, cur: State.Inspection): Node?
 	return ui.col(body, { key = "detail" })
 end
 
-local HINT = "j/k move · tab or 1/2/3 switch · enter opens a related record · o Open in NetSuite"
-	.. " · / new record · b back · r reload · c connection · esc close"
+local HINT = "j/k move · tab or 1/2/3 switch · enter opens a related record (shift+enter: in a new pane)"
+	.. " · o Open in NetSuite · / new record · b back · r reload · l refresh labels · c connection · esc close"
 local HELD_HINT = "enter inspects · esc closes"
 
 local function heldView(s: State): { main: Node, dock: Node? }

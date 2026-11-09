@@ -304,6 +304,28 @@ function M.refs(kind: Kind): { RefColumn }
 	return REFS[kind.family] or {}
 end
 
+-- Kinds with no single REST record type: generic ones, and items REST
+-- splits into sale / purchase / resale types (noninventorysaleitem, ...).
+local NO_REST: { [string]: boolean } = {
+	transaction = true,
+	entity = true,
+	item = true,
+	noninventoryitem = true,
+	otherchargeitem = true,
+	serviceitem = true,
+}
+
+-- The REST record type whose metadata catalog entry titles `kind`'s
+-- standard fields (lib/ns/metadata.luau), or nil when there is none. REST
+-- record types are the SuiteScript record types; custom record types are
+-- their script ids.
+function M.restType(kind: Kind): string?
+	if NO_REST[kind.record] then
+		return nil
+	end
+	return kind.record
+end
+
 -- The UI host of `accountId` (`1234567_SB1` -> `1234567-sb1.app.netsuite.com`),
 -- or nil for an id that cannot be a host name.
 function M.host(accountId: string): string?

@@ -2,8 +2,8 @@
 -- State of the `inspect` block: reads one NetSuite record through SuiteQL
 -- (read-only) and shows its fields, system notes and related records.
 -- `update` returns the next state and the effects the host runs (query
--- through NsHost, open a URL, focus the input, save, exit). Nothing here
--- touches `tern`.
+-- through NsHost, read field labels, open a URL, open a related record in a
+-- new pane, focus the input, save, exit). Nothing here touches `tern`.
 --
 -- One inspection at a time: every query carries a token (`req`) that the
 -- inspection records per part; starting another inspection (a related
@@ -11,6 +11,8 @@
 -- of an older one change nothing. Parts:
 --   rectype   custom records: the type's table and numeric id first
 --   record    SELECT * of the record; then, in parallel:
+--   std       standard field labels: NetSuite's REST metadata catalog of
+--             the record type (REST connections only; `l` refreshes)
 --   labels    custom field labels (falls back to `labels-plain`), then
 --   display   display names of the reference columns
 --   notes     system notes
@@ -46,13 +48,18 @@ export type Key = {
 export type Env = { null: any }
 
 export type Effect = {
-	t: "query" | "browse" | "focus" | "save" | "exit",
+	-- metadata: read field labels (NsHost.metadata); split: open `url` (a
+	-- plain inspect link) in a new pane through a single-use grant.
+	t: "query" | "metadata" | "browse" | "split" | "focus" | "save" | "exit",
 	req: number?,
 	part: string?,
 	connection: string?,
 	sql: string?,
 	params: { any }?,
 	max_rows: number?,
+	-- metadata: the REST record type and whether to bypass the cache.
+	record: string?,
+	refresh: boolean?,
 	url: string?,
 	id: string?,
 }
@@ -62,8 +69,15 @@ export type Msg = {
 	key: Key?,
 	act: string?,
 	value: string?,
+	-- action: shift was held (a shift-click).
+	shift: boolean?,
 	req: number?,
 	rows: { any }?,
+	-- metadata result: field labels, when NetSuite sent them, whether from
+	-- the cache.
+	labels: { [string]: string }?,
+	fetched: number?,
+	cached: boolean?,
 	err: NsError?,
 	height: number?,
 	width: number?,
@@ -82,6 +96,13 @@ export type Inspection = {
 	missing: boolean,
 	title: string?,
 	labels: Record.Labels,
+	-- Standard field labels by column (REST metadata catalog), when they
+	-- were fetched from NetSuite and whether they came from the cache.
+	std: { [string]: string },
+	stdFetched: number?,
+	stdCached: boolean,
+	-- Why standard fields keep their column names without an error.
+	stdNote: string?,
 	names: { [string]: string },
 	refs: { Record.Related },
 	notes: { Record.Note }?,
@@ -130,6 +151,16 @@ M.TABS = table.freeze(TABS)
 
 function M.target(s: State): Target?
 	return s.targets[s.selected]
+end
+
+-- The label of `column`: a custom field's own name, else the record type's
+-- schema title, else nil (the view shows the column name).
+function M.label(cur: Inspection, column: string): string?
+	local meta = cur.labels[column]
+	if meta then
+		return meta.label
+	end
+	return cur.std[column]
 end
 
 -- Fields shown on the fields tab (empty ones only when asked).
@@ -279,6 +310,41 @@ local function askRecord(s: State, cur: Inspection, effects: { Effect })
 	issue(s, cur, "record", q, effects)
 end
 
+-- Asks for the standard field labels of the (refined) record type, or says
+-- why standard fields keep their column names.
+local function askLabels(s: State, cur: Inspection, effects: { Effect }, refresh: boolean)
+	local tg, kind = M.target(s), cur.kind
+	if tg == nil or kind == nil then
+		return
+	end
+	if tg.transport ~= "rest" then
+		cur.stdNote = string.format(
+			"Standard fields show their column names: labels come from NetSuite's REST record service,"
+				.. " and connection %q uses a RESTlet.",
+			tg.id
+		)
+		return
+	end
+	local rest = Catalog.restType(kind)
+	if rest == nil then
+		cur.stdNote = string.format(
+			"Standard fields show their column names: NetSuite's REST service has no single record type for %s.",
+			kind.label
+		)
+		return
+	end
+	s.seq += 1
+	cur.pending.std = s.seq
+	table.insert(effects, {
+		t = "metadata",
+		req = s.seq,
+		part = "std",
+		connection = tg.id,
+		record = rest,
+		refresh = refresh,
+	})
+end
+
 local function newInspection(ref: Ref.Ref): Inspection
 	return {
 		ref = ref,
@@ -288,6 +354,10 @@ local function newInspection(ref: Ref.Ref): Inspection
 		missing = false,
 		title = nil,
 		labels = {},
+		std = {},
+		stdFetched = nil,
+		stdCached = false,
+		stdNote = nil,
 		names = {},
 		refs = {},
 		notes = nil,
@@ -385,6 +455,7 @@ local function onRecord(s: State, cur: Inspection, msg: Msg, effects: { Effect }
 	cur.title = Record.title(fields)
 	cur.refs = Record.references(kind, fields, cur.labels)
 	local id = cur.ref.id
+	askLabels(s, cur, effects, false)
 	local labels = Queries.labels(columns(cur), true)
 	if labels then
 		issue(s, cur, "labels", labels, effects)
@@ -472,6 +543,10 @@ local function onResult(s: State, msg: Msg, effects: { Effect }): boolean
 		c.notesTruncated = #rows >= Queries.MAX_NOTES
 	elseif part == "lines" then
 		c.lines = Record.lines(rows, null)
+	elseif part == "std" then
+		c.std = msg.labels or {}
+		c.stdFetched = msg.fetched
+		c.stdCached = msg.cached == true
 	elseif part == "children" or part == "txns" then
 		local back = if c.back then table.clone(c.back :: { Record.Related }) else {}
 		for _, r in Record.transactions(rows, if part == "children" then "Created from this" else "Transaction", null) do
@@ -549,7 +624,10 @@ local function move(s: State, delta: number): boolean
 	return true
 end
 
-local function openSelected(s: State, effects: { Effect }): boolean
+-- Inspects the selected related record: in place (Back returns), or with
+-- `beside` in a new inspect pane, which opens through a plain inspect link
+-- the host turns into a single-use grant (lib/inspector/link.luau).
+local function openSelected(s: State, effects: { Effect }, beside: boolean): boolean
 	if s.tab ~= "related" then
 		return false
 	end
@@ -561,7 +639,37 @@ local function openSelected(s: State, effects: { Effect }): boolean
 	if kind == nil then
 		return false
 	end
+	if beside then
+		local tg = M.target(s)
+		if tg == nil then
+			return false
+		end
+		table.insert(effects, { t = "split", url = Link.url({ connection = tg.id, type = kind.record, id = r.id }) })
+		return false
+	end
 	inspect(s, { kind = kind, id = r.id, rectype = nil, account = nil }, effects, true)
+	return true
+end
+
+-- Reads the standard field labels from NetSuite again, past the cache; the
+-- labels shown stay until the new ones arrive.
+local function refreshLabels(s: State, effects: { Effect }): boolean
+	local cur = s.cur
+	if cur == nil or cur.fields == nil or s.held then
+		return false
+	end
+	local c = table.clone(cur)
+	c.pending = table.clone(cur.pending)
+	local errs: { [string]: NsError } = {}
+	for part, e in cur.errs do
+		if part ~= "std" then
+			errs[part] = e
+		end
+	end
+	c.errs = errs
+	c.stdNote = nil
+	s.cur = c
+	askLabels(s, c, effects, true)
 	return true
 end
 
@@ -677,13 +785,15 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 	elseif ch == "1" or ch == "2" or ch == "3" then
 		s.tab = M.TABS[tonumber(ch) :: number]
 	elseif name == "enter" or name == "return" then
-		return openSelected(s, effects)
+		return openSelected(s, effects, key.shift == true)
 	elseif ch == "/" or ch == "i" then
 		startEdit(s, effects)
 	elseif ch == "o" then
 		return browse(s, effects)
 	elseif ch == "r" then
 		return reload(s, effects)
+	elseif ch == "l" then
+		return refreshLabels(s, effects)
 	elseif ch == "b" or name == "backspace" then
 		return goBack(s, effects)
 	elseif ch == "e" then
@@ -699,7 +809,7 @@ local function onKey(s: State, key: Key, effects: { Effect }): boolean
 	return true
 end
 
-local function onAction(s: State, act: string, value: string, effects: { Effect }): boolean
+local function onAction(s: State, act: string, value: string, shift: boolean, effects: { Effect }): boolean
 	if s.held then
 		if act == "start" then
 			return start(s, effects)
@@ -722,7 +832,7 @@ local function onAction(s: State, act: string, value: string, effects: { Effect 
 		sel[s.tab] = i
 		s.sel = sel
 		if act == "go" then
-			openSelected(s, effects)
+			openSelected(s, effects, shift)
 		end
 	elseif act == "open-ui" then
 		return browse(s, effects)
@@ -730,6 +840,8 @@ local function onAction(s: State, act: string, value: string, effects: { Effect 
 		return reload(s, effects)
 	elseif act == "back" then
 		return goBack(s, effects)
+	elseif act == "labels" then
+		return refreshLabels(s, effects)
 	elseif act == "empty" then
 		s.showEmpty = not s.showEmpty
 	elseif act == "conn" then
@@ -891,7 +1003,7 @@ function M.update(state: State, msg: Msg): (State, { Effect })
 	if msg.t == "key" and msg.key then
 		changed = onKey(s, msg.key, effects)
 	elseif msg.t == "action" and msg.act then
-		changed = onAction(s, msg.act, msg.value or "", effects)
+		changed = onAction(s, msg.act, msg.value or "", msg.shift == true, effects)
 	elseif msg.t == "result" then
 		changed = onResult(s, msg, effects)
 	elseif msg.t == "resize" and msg.height then

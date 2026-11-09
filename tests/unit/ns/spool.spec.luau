@@ -1,5 +1,7 @@
 --!strict
+local Encoding = require("../../../plugin/lib/ns/encoding")
 local Spool = require("../../../plugin/lib/ns/spool")
+local json = require("../../lib/json")
 local t = require("../../lib/test")
 
 local describe, it, expect = t.describe, t.it, t.expect
@@ -38,6 +40,70 @@ describe("pending request records", function()
 			"expired"
 		)
 		expect(Spool.checkPending({ action = "query", exp = 10 }, "query", 1)).toContain("malformed")
+	end)
+end)
+
+describe("record metadata requests", function()
+	local ID = "0123456789abcdef01234567"
+
+	it("round-trips a metadata link, which carries only the request id", function()
+		local url = Spool.link("metadata", ID)
+		expect(url).toBe("tern-netsuite://ns/metadata?id=" .. ID)
+		local action, id = Spool.parseLink(url)
+		expect(action).toBe("metadata")
+		expect(id).toBe(ID)
+	end)
+
+	it("serves a metadata link only for a record made for metadata, never for credentials", function()
+		local rec = Spool.pending("metadata", "query", "acme-sb", 1000)
+		expect(Spool.checkPending(rec, "metadata", 1000)).toBeNil()
+		expect(Spool.checkPending(rec, "store", 1000)).toContain("does not match")
+		expect(Spool.checkPending(Spool.pending("query", "query", "acme-sb", 1000), "metadata", 1000)).toContain(
+			"does not match"
+		)
+	end)
+
+	it("keeps each action's request file apart, so a cleanup removes the right one", function()
+		expect(Spool.requestKind("query")).toBe("query")
+		expect(Spool.requestKind("metadata")).toBe("meta")
+		expect(Spool.requestKind("store")).toBe("cred")
+		expect(Spool.requestKind("forget")).toBe("cred")
+	end)
+
+	local function request(fields: { [string]: any }): string
+		local doc: { [string]: any } = { v = Spool.VERSION, id = ID, connection = "acme-sb", at = 1000 }
+		for k, v in fields do
+			doc[k] = v
+		end
+		return Encoding.json(doc)
+	end
+
+	it("reads the connection, record type and refresh flag of a request", function()
+		local req = Spool.decodeMetadata(request({ record = "salesorder", refresh = true }), ID, 1000, json.decode)
+		expect(req and req.record).toBe("salesorder")
+		expect(req and req.refresh).toBe(true)
+		local plain = Spool.decodeMetadata(request({ record = "customrecord_acme_box" }), ID, 1000, json.decode)
+		expect(plain and plain.refresh).toBe(false)
+	end)
+
+	it("refuses a request whose record type could leave the metadata path", function()
+		local bads: { any } = { "../query/v1/suiteql", "salesorder?select=x", "", 5 }
+		for _, bad in bads do
+			local req, err = Spool.decodeMetadata(request({ record = bad }), ID, 1000, json.decode)
+			expect(req).toBeNil()
+			expect(err).toContain("record type")
+		end
+	end)
+
+	it("hands the labels of an answer to the host half", function()
+		local resp = Spool.decodeResponse(
+			Encoding.json({ id = ID, ok = true, labels = { tranid = "Order #" }, fetched = 1000, cached = true }),
+			ID,
+			json.decode
+		)
+		expect(resp.labels).toEqual({ tranid = "Order #" })
+		expect(resp.fetched).toBe(1000)
+		expect(resp.cached).toBe(true)
 	end)
 end)
 

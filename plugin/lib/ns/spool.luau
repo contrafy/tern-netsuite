@@ -7,9 +7,11 @@
 -- `<id>.resp.json`, which the host polls for, reads and deletes. URLs carry
 -- only the random id: SQL and credentials never appear in a link. Files are
 -- written 0600 through `umask 077` and renamed into place, so a reader
--- never sees a partial file.
+-- never sees a partial file. Actions: query (SuiteQL), metadata (field
+-- labels, lib/ns/metadata.luau), store / forget (credentials).
 
 local Crypto = require("./crypto")
+local Endpoints = require("./endpoints")
 local Errors = require("./errors")
 
 local M = {}
@@ -27,13 +29,18 @@ M.MAX_RESPONSE_BYTES = 8388608
 -- something a user is waiting for.
 M.STALE_SECONDS = 300
 
-export type Action = "query" | "store" | "forget"
+export type Action = "query" | "metadata" | "store" | "forget"
 
-local ACTIONS: { [string]: boolean } = { query = true, store = true, forget = true }
+local ACTIONS: { [string]: boolean } = { query = true, metadata = true, store = true, forget = true }
 
 -- jwt: the (non-secret) JWT signing input openssl reads while the private
 -- key arrives on its stdin.
-export type Kind = "query" | "cred" | "resp" | "jwt"
+export type Kind = "query" | "meta" | "cred" | "resp" | "jwt"
+
+-- The request file kind of `action`.
+function M.requestKind(action: Action): Kind
+	return if action == "query" then "query" elseif action == "metadata" then "meta" else "cred"
+end
 
 function M.validId(id: string): boolean
 	return string.find(id, "^[a-f0-9]+$") ~= nil and #id >= 16 and #id <= 64
@@ -94,7 +101,7 @@ function M.checkPending(stored: any, action: string, now: number): string?
 	if type(stored.connection) ~= "string" or stored.connection == "" then
 		return "the recorded NetSuite request is malformed"
 	end
-	if action ~= "query" and stored.origin ~= "connect" then
+	if (action == "store" or action == "forget") and stored.origin ~= "connect" then
 		return "credentials change only from Tern NetSuite: Connect account"
 	end
 	return nil
@@ -132,6 +139,17 @@ export type QueryRequest = {
 	at: number,
 }
 
+export type MetadataRequest = {
+	v: number,
+	id: string,
+	connection: string,
+	-- REST record type (Endpoints.validRecordType).
+	record: string,
+	-- Ask NetSuite even when the cache holds fresh labels.
+	refresh: boolean,
+	at: number,
+}
+
 export type StoreRequest = {
 	v: number,
 	id: string,
@@ -149,6 +167,11 @@ export type Response = {
 	pages: number?,
 	error: NsError?,
 	ms: number?,
+	-- metadata: field labels, when NetSuite sent them (os.time()) and
+	-- whether they came from the cache.
+	labels: { [string]: string }?,
+	fetched: number?,
+	cached: boolean?,
 }
 
 local function decodeObject(text: string, decode: (string) -> any): any
@@ -197,6 +220,26 @@ function M.decodeQuery(text: string, id: string, now: number, decode: (string) -
 		sql = doc.sql,
 		params = params,
 		max_rows = maxRows,
+		at = doc.at,
+	},
+		nil
+end
+
+function M.decodeMetadata(text: string, id: string, now: number, decode: (string) -> any): (MetadataRequest?, string?)
+	local doc = decodeObject(text, decode)
+	local err = common(doc, id, now)
+	if err then
+		return nil, err
+	end
+	if type(doc.record) ~= "string" or not Endpoints.validRecordType(doc.record) then
+		return nil, "the request names no valid record type"
+	end
+	return {
+		v = doc.v,
+		id = id,
+		connection = doc.connection,
+		record = doc.record,
+		refresh = doc.refresh == true,
 		at = doc.at,
 	},
 		nil
@@ -254,6 +297,9 @@ function M.decodeResponse(text: string, id: string, decode: (string) -> any): Re
 		pages = if type(doc.pages) == "number" then doc.pages else nil,
 		error = err,
 		ms = if type(doc.ms) == "number" then doc.ms else nil,
+		labels = if doc.ok and type(doc.labels) == "table" then doc.labels else nil,
+		fetched = if type(doc.fetched) == "number" then doc.fetched else nil,
+		cached = if doc.ok then doc.cached == true else nil,
 	}
 end
 

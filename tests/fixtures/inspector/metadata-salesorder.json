@@ -1,0 +1,81 @@
+{
+  "type": "object",
+  "properties": {
+    "links": {
+      "title": "Links",
+      "type": "array",
+      "readOnly": true,
+      "items": { "$ref": "/services/rest/record/v1/metadata-catalog/nsLink" }
+    },
+    "id": {
+      "title": "Internal ID",
+      "type": "string",
+      "nullable": true
+    },
+    "tranId": {
+      "title": "Order #",
+      "type": "string",
+      "nullable": true
+    },
+    "tranDate": {
+      "title": "Date",
+      "type": "string",
+      "format": "date",
+      "nullable": true
+    },
+    "entity": {
+      "title": "Customer",
+      "type": "object",
+      "properties": {
+        "id": { "title": "Internal identifier", "type": "string" },
+        "refName": { "title": "Reference Name", "type": "string" }
+      }
+    },
+    "subsidiary": {
+      "title": "Subsidiary",
+      "type": "object",
+      "$ref": "/services/rest/record/v1/metadata-catalog/subsidiary"
+    },
+    "memo": {
+      "title": "Memo",
+      "type": "string",
+      "description": "<p>Enter a memo\nfor this order.</p>",
+      "nullable": true
+    },
+    "status": {
+      "title": "Status",
+      "type": "object",
+      "properties": {
+        "id": { "title": "Internal identifier", "type": "string", "enum": ["A", "B"] },
+        "refName": { "title": "Reference Name", "type": "string" }
+      }
+    },
+    "createdFrom": {
+      "title": "Created From",
+      "type": "object",
+      "$ref": "/services/rest/record/v1/metadata-catalog/transaction"
+    },
+    "custbody_acme_channel": {
+      "title": "Sales channel",
+      "type": "string",
+      "nullable": true,
+      "x-ns-custom-field": true
+    },
+    "item": {
+      "title": "Items",
+      "type": "object",
+      "$ref": "/services/rest/record/v1/metadata-catalog/salesorder-itemCollection"
+    },
+    "shipDate": {
+      "type": "string",
+      "format": "date",
+      "nullable": true
+    },
+    "billAddress": {
+      "title": "  Billing\taddress  ",
+      "type": "string",
+      "nullable": true
+    }
+  },
+  "$schema": "https://json-schema.org/draft-06/hyper-schema#"
+}

@@ -36,6 +36,8 @@ M.NETWORK = "TNS_NETWORK"
 M.BAD_RESPONSE = "TNS_BAD_RESPONSE"
 M.NO_WINDOW = "TNS_NO_WINDOW"
 M.SIGNING = "TNS_SIGNING"
+-- A REST-only request (record metadata) on a RESTlet connection.
+M.REST_ONLY = "TNS_REST_ONLY"
 
 local MAX_MESSAGE = 600
 

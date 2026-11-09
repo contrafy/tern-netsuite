@@ -61,12 +61,25 @@ local function key(s: State.State, name: string, text: string?): (State.State, {
 	return State.update(s, { t = "key", key = { name = name, text = text } })
 end
 
+local function metadataOf(effects: { State.Effect }): State.Effect?
+	local found: State.Effect? = nil
+	for _, e in effects do
+		if e.t == "metadata" then
+			expect(found).toBeNil()
+			found = e
+		end
+	end
+	return found
+end
+
 -- A sales order read in full from the fixtures.
 local function loadedOrder(): State.State
 	local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
 	local q = queries(effects)
 	s, effects = answer(s, q.record, rows("salesorder-rest.json"))
+	local std = metadataOf(effects) :: State.Effect
 	q = queries(effects)
+	s = State.update(s, { t = "result", req = std.req, labels = {}, fetched = 1000 })
 	local after: { State.Effect }
 	s, after = answer(s, q.labels, rows("labels-rest.json"))
 	s = answer(s, queries(after).display, rows("display-rest.json"))
@@ -230,6 +243,115 @@ describe("record inspector state", function()
 		local s, effects = State.init({ "connection=nope", "type=customer", "id=42" }, nil, cfg, env)
 		expect(#effects).toBe(0)
 		expect(s.problem).toContain("nope")
+	end)
+end)
+
+local STD = { tranid = "Order #", trandate = "Date", entity = "Customer", custbody_acme_box = "Box (schema)" }
+
+describe("standard field labels", function()
+	it("asks the metadata catalog of the specific record type once the record row names it", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=transaction", "id=123" }, nil, cfg, env)
+		expect(metadataOf(effects)).toBeNil()
+		s, effects = answer(s, queries(effects).record, rows("salesorder-rest.json"))
+		local m = metadataOf(effects) :: State.Effect
+		expect(m.record).toBe("salesorder")
+		expect(m.connection).toBe("sb-rest")
+		expect(m.refresh).toBe(false)
+		expect(State.loading(s, "std")).toBe(true)
+	end)
+
+	it("labels standard fields from the answer; fields the schema does not title keep their column name", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = answer(s, queries(effects).record, rows("salesorder-rest.json"))
+		expect(State.label(s.cur :: State.Inspection, "tranid")).toBeNil()
+		s = State.update(s, {
+			t = "result",
+			req = (metadataOf(effects) :: State.Effect).req,
+			labels = STD,
+			fetched = 1000,
+			cached = true,
+		})
+		local cur = s.cur :: State.Inspection
+		expect(State.label(cur, "tranid")).toBe("Order #")
+		expect(State.label(cur, "memo")).toBeNil()
+		expect(cur.stdFetched).toBe(1000)
+		expect(cur.stdCached).toBe(true)
+	end)
+
+	it("prefers the custom field's own label over the schema title", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = answer(s, queries(effects).record, rows("salesorder-rest.json"))
+		local meta = metadataOf(effects) :: State.Effect
+		s = answer(s, queries(effects).labels, rows("labels-rest.json"))
+		s = State.update(s, { t = "result", req = meta.req, labels = STD, fetched = 1000 })
+		expect(State.label(s.cur :: State.Inspection, "custbody_acme_box")).toBe("Shipping box")
+	end)
+
+	it("keeps column names when the metadata read fails, and says why", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = answer(s, queries(effects).record, rows("salesorder-rest.json"))
+		s = answer(s, metadataOf(effects) :: State.Effect, nil, Errors.new("permission", "INSUFFICIENT_PERMISSION"))
+		local cur = s.cur :: State.Inspection
+		expect(cur.errs.std.kind).toBe("permission")
+		expect(State.label(cur, "tranid")).toBeNil()
+		expect(State.loading(s, "std")).toBe(false)
+	end)
+
+	it("does not ask on a RESTlet connection, which cannot reach the REST record service, and says so", function()
+		local restletCfg = Config.parse(
+			[[{
+				"accounts": [{ "id": "sb", "label": "SB1", "account_id": "1234567_SB1" }],
+				"connections": [{ "id": "sb-restlet", "account": "sb", "auth": "tba", "transport": "restlet",
+					"restlet": { "script": "customscript_acme_suiteql", "deploy": "customdeploy_acme_suiteql" } }]
+			}]],
+			json.decode
+		)
+		local s, effects = State.init({ "type=salesorder", "id=123" }, nil, restletCfg, env)
+		s, effects = answer(s, queries(effects).record, rows("salesorder-rest.json"))
+		expect(metadataOf(effects)).toBeNil()
+		expect((s.cur :: State.Inspection).stdNote).toContain("RESTlet")
+	end)
+
+	it("does not ask for a generic type the REST service has no record type for", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=item", "id=7" }, nil, cfg, env)
+		s, effects = answer(s, queries(effects).record, { { id = "7", itemid = "Acme widget", itemtype = "Mystery" } })
+		expect(metadataOf(effects)).toBeNil()
+		expect((s.cur :: State.Inspection).stdNote).toContain("column names")
+	end)
+
+	it("refreshes the labels from NetSuite on l, bypassing the week-long cache", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = answer(s, queries(effects).record, rows("salesorder-rest.json"))
+		s = State.update(s, { t = "result", req = (metadataOf(effects) :: State.Effect).req, labels = STD })
+		local _, chip = State.update(s, { t = "action", act = "labels" })
+		expect((metadataOf(chip) :: State.Effect).refresh).toBe(true)
+		s, effects = key(s, "l", "l")
+		local m = metadataOf(effects) :: State.Effect
+		expect(m.refresh).toBe(true)
+		expect(m.record).toBe("salesorder")
+		-- the labels shown stay until the new ones arrive
+		expect(State.label(s.cur :: State.Inspection, "tranid")).toBe("Order #")
+	end)
+end)
+
+describe("related records in a new pane", function()
+	it("opens the selected related record beside on shift+enter, through a link the block grants", function()
+		local s = key(loadedOrder(), "3", "3")
+		local after, effects = State.update(s, { t = "key", key = { name = "enter", shift = true } })
+		expect(effects).toEqual({
+			{ t = "split", url = "tern-netsuite://inspect?connection=sb-rest&type=entity&id=42" },
+		})
+		-- this pane keeps its record and history
+		expect((after.cur :: State.Inspection).ref.id).toBe("123")
+		expect(#after.history).toBe(0)
+	end)
+
+	it("opens a shift-clicked related row beside too", function()
+		local s = key(loadedOrder(), "3", "3")
+		local _, effects = State.update(s, { t = "action", act = "go", value = "2", shift = true })
+		expect(effects).toEqual({
+			{ t = "split", url = "tern-netsuite://inspect?connection=sb-rest&type=subsidiary&id=1" },
+		})
 	end)
 end)
 

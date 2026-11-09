@@ -81,6 +81,20 @@ describe("record type catalog", function()
 		expect(Catalog.accountOfHost("1234567.app.netsuite.com.evil.example")).toBeNil()
 		expect(Catalog.accountOfHost("system.netsuite.com")).toBeNil()
 	end)
+
+	it("names the REST record type whose metadata labels a record's standard fields", function()
+		expect(Catalog.restType(kind("salesorder"))).toBe("salesorder")
+		expect(Catalog.restType(kind("customer"))).toBe("customer")
+		expect(Catalog.restType(kind("class"))).toBe("classification")
+		expect(Catalog.restType(kind("inventoryitem"))).toBe("inventoryitem")
+		expect(Catalog.restType(kind("customrecord_acme_box"))).toBe("customrecord_acme_box")
+	end)
+
+	it("names no REST record type for generic kinds or items REST splits by sale and purchase", function()
+		for _, name in { "transaction", "entity", "item", "noninventoryitem", "otherchargeitem", "serviceitem" } do
+			expect(Catalog.restType(kind(name))).toBeNil()
+		end
+	end)
 end)
 
 return nil

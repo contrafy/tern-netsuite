@@ -2,10 +2,11 @@
 -- Window half of the NetSuite connection layer. Credentials can only live
 -- here: `tern.secrets` exists in the window VM and is nil in the host VM
 -- (verified on Tern 0.6.3). This half therefore owns the SuiteQL client
--- (signing, token cache, fetch, paging) and serves the host half through
--- `tern-netsuite://ns/<action>?id=<id>` links whose payloads travel in
--- 0600 spool files (lib/ns/spool.luau). Window-side features (status line,
--- timers) call `query` directly.
+-- (signing, token cache, fetch, paging) and the record metadata reader
+-- (field labels, GET only: lib/ns/metadata.luau), and serves the host half
+-- through `tern-netsuite://ns/<action>?id=<id>` links whose payloads travel
+-- in 0600 spool files (lib/ns/spool.luau). Window-side features (status
+-- line, timers) call `query` directly.
 
 local lazy = require("./lib/lazy")
 local Config = require("./lib/config")
@@ -15,20 +16,42 @@ local Credentials = lazy(function()
 end)
 local Endpoints = require("./lib/ns/endpoints")
 local Errors = require("./lib/ns/errors")
+local Metadata = lazy(function()
+	return require("./lib/ns/metadata")
+end)
 local Oauth1 = lazy(function()
 	return require("./lib/ns/oauth1")
 end)
-local Oauth2 = require("./lib/ns/oauth2")
-local Query = require("./lib/ns/query")
+local Oauth2 = lazy(function()
+	return require("./lib/ns/oauth2")
+end)
+local Query = lazy(function()
+	return require("./lib/ns/query")
+end)
 local Spool = require("./lib/ns/spool")
-local Transport = require("./lib/ns/transport")
+local Transport = lazy(function()
+	return require("./lib/ns/transport")
+end)
 
 type NsError = Errors.NsError
 type Connection = Config.Connection
+type HttpRequest = typeof(Transport().rest("", "", 0, 0))
+type HttpResult = Errors.HttpResult
+type Token = typeof(Oauth2().parseToken(nil :: any, nil :: any, 0))
 
 export type QueryOptions = { max_rows: number? }
-export type Result = Query.Result
+-- lib/ns/query.luau's Result (that module loads on the first query).
+export type Result = { rows: { any }, truncated: boolean, pages: number }
 export type Callback = (result: Result?, err: NsError?) -> ()
+
+export type MetadataOptions = {
+	-- Ask NetSuite even when the cache holds labels younger than a week.
+	refresh: boolean?,
+}
+-- Field labels (lower-case field name -> label), when NetSuite sent them
+-- (os.time()) and whether they came from the cache.
+export type MetadataResult = { labels: { [string]: string }, fetched: number, cached: boolean }
+export type MetadataCallback = (result: MetadataResult?, err: NsError?) -> ()
 
 export type Status = {
 	state: "ok" | "error",
@@ -67,7 +90,7 @@ end
 -- Connection id -> stored values. Dropped when credentials change or a
 -- query fails authentication (they may have been replaced in the keychain).
 local secretsCache: { [string]: { [string]: string } } = {}
-local tokens: { [string]: Oauth2.Token } = {}
+local tokens: { [string]: Token } = {}
 local tokenWaiters: { [string]: { (string?, NsError?) -> () } } = {}
 
 local function forgetCaches(connectionId: string)
@@ -174,14 +197,13 @@ local function loadSecrets(conn: Connection, cb: ({ [string]: string }?, NsError
 	end
 end
 
-type HttpResult = Transport.HttpResult
-
-local function send(req: Transport.HttpRequest, timeoutMs: number, cb: (HttpResult) -> ())
+local function send(req: HttpRequest, timeoutMs: number, cb: (HttpResult) -> ())
 	local ok, err = try(function()
 		tern.fetch(req.url, {
 			method = req.method,
 			headers = req.headers,
-			body = req.body,
+			-- GET (record metadata) sends no body at all.
+			body = if req.body == "" then nil else req.body,
 			timeout_ms = timeoutMs,
 		}, function(r: FetchResult)
 			cb({ status = r.status, body = r.body, error = r.error, timed_out = r.timed_out })
@@ -214,9 +236,9 @@ local function fetchToken(
 	counter += 1
 	local id = Spool.newId(seed, counter)
 	local now = os.time()
-	local input = Oauth2.signingInput(
+	local input = Oauth2().signingInput(
 		values.certificate_id,
-		Oauth2.claims({ client_id = values.client_id, account_id = accountId, now = now, jti = id })
+		Oauth2().claims({ client_id = values.client_id, account_id = accountId, now = now, jti = id })
 	)
 	local dir = spoolDir()
 	local path = Spool.path(dir, "jwt", id)
@@ -227,7 +249,7 @@ local function fetchToken(
 	end
 	local ok, err = try(function()
 		tern.process.run(
-			Oauth2.signArgv(path),
+			Oauth2().signArgv(path),
 			{ stdin = values.private_key, timeout_ms = 15000 },
 			function(r: ProcessResult)
 				pcall(tern.fs.remove, path)
@@ -243,9 +265,9 @@ local function fetchToken(
 					)
 					return
 				end
-				local req = Oauth2.tokenRequest(accountId, Oauth2.assertion(input, signature :: string))
+				local req = Oauth2().tokenRequest(accountId, Oauth2().assertion(input, signature :: string))
 				send(req, conn.timeout_ms, function(res: HttpResult)
-					local token, terr = Oauth2.parseToken(res, tern.json.decode, os.time())
+					local token, terr = Oauth2().parseToken(res, tern.json.decode, os.time())
 					if token then
 						tokens[conn.id] = token
 						finish(token.access_token, nil)
@@ -266,8 +288,8 @@ local function authorize(
 	conn: Connection,
 	accountId: string,
 	values: { [string]: string },
-	req: Transport.HttpRequest,
-	cb: (Transport.HttpRequest?, NsError?) -> ()
+	req: HttpRequest,
+	cb: (HttpRequest?, NsError?) -> ()
 )
 	local headers = table.clone(req.headers)
 	local signed = table.clone(req)
@@ -285,8 +307,8 @@ local function authorize(
 		return
 	end
 	local token = tokens[conn.id]
-	if Oauth2.fresh(token, os.time()) then
-		headers.Authorization = "Bearer " .. (token :: Oauth2.Token).access_token
+	if token and Oauth2().fresh(token, os.time()) then
+		headers.Authorization = "Bearer " .. token.access_token
 		cb(signed, nil)
 		return
 	end
@@ -328,7 +350,7 @@ function M.query(connectionId: string, sql: string, params: { any }?, opts: Quer
 		return
 	end
 	local conn = target.connection
-	local plan, perr = Query.plan({
+	local plan, perr = Query().plan({
 		connection = conn,
 		account_id = target.account_id,
 		sql = sql,
@@ -344,31 +366,110 @@ function M.query(connectionId: string, sql: string, params: { any }?, opts: Quer
 			finish(nil, serr)
 			return
 		end
-		local function step(p: Query.Plan)
-			authorize(
-				conn,
-				target.account_id,
-				values,
-				Query.request(p),
-				function(req: Transport.HttpRequest?, aerr: NsError?)
-					if req == nil then
-						finish(nil, aerr)
-						return
-					end
-					send(req, conn.timeout_ms, function(res: HttpResult)
-						local s = Query.advance(p, res, tern.json.decode)
-						if s.kind == "next" then
-							step(s.plan)
-						elseif s.kind == "done" then
-							finish(s.result, nil)
-						else
-							finish(nil, s.error)
-						end
-					end)
+		local function step(p)
+			authorize(conn, target.account_id, values, Query().request(p), function(req: HttpRequest?, aerr: NsError?)
+				if req == nil then
+					finish(nil, aerr)
+					return
 				end
-			)
+				send(req, conn.timeout_ms, function(res: HttpResult)
+					local s = Query().advance(p, res, tern.json.decode)
+					if s.kind == "next" then
+						step(s.plan)
+					elseif s.kind == "done" then
+						finish(s.result, nil)
+					else
+						finish(nil, s.error)
+					end
+				end)
+			end)
 		end
-		step(plan :: Query.Plan)
+		step(plan)
+	end)
+end
+
+local MAX_METADATA_CACHE = 1048576
+
+-- Reads the field labels of REST record type `recordType` on connection
+-- `connectionId` and calls `cb` once with them or a normalized error. Labels
+-- come from the plugin data cache while younger than a week (unless
+-- opts.refresh), else from one GET of NetSuite's metadata catalog, never
+-- any other method or path (Metadata.guard runs on the signed request).
+-- RESTlet connections cannot reach that service: REST_ONLY.
+function M.metadata(connectionId: string, recordType: string, opts: MetadataOptions?, cb: MetadataCallback)
+	local called = false
+	local function finish(result: MetadataResult?, err: NsError?)
+		if called then
+			return
+		end
+		called = true
+		if err and err.kind == "auth" then
+			forgetCaches(connectionId)
+		end
+		local ok, cerr = try(function()
+			cb(result, err)
+		end)
+		if not ok then
+			log.warn("tern-netsuite ns metadata callback failed", cerr)
+		end
+	end
+	local target, rerr = resolve(connectionId)
+	if target == nil then
+		finish(nil, rerr)
+		return
+	end
+	local conn, account = target.connection, target.account_id
+	local req, qerr = Metadata().request(conn, account, recordType)
+	if req == nil then
+		finish(nil, qerr)
+		return
+	end
+	local data = tern.plugin.data
+	local path = Metadata().cachePath(data, account, recordType) :: string
+	if not (opts and opts.refresh) then
+		local okRead, text = pcall(tern.fs.read, path, MAX_METADATA_CACHE)
+		local entry = if okRead and type(text) == "string"
+			then Metadata().readCache(text, account, recordType, os.time(), tern.json.decode)
+			else nil
+		if entry then
+			finish({ labels = entry.labels, fetched = entry.fetched, cached = true }, nil)
+			return
+		end
+	end
+	loadSecrets(conn, function(values: { [string]: string }?, serr: NsError?)
+		if values == nil then
+			finish(nil, serr)
+			return
+		end
+		authorize(conn, account, values, req, function(signed: HttpRequest?, aerr: NsError?)
+			if signed == nil then
+				finish(nil, aerr)
+				return
+			end
+			local refused = Metadata().guard(signed, account, recordType)
+			if refused then
+				finish(nil, refused)
+				return
+			end
+			send(signed, conn.timeout_ms, function(res: HttpResult)
+				local labels, perr = Metadata().parse(res, tern.json.decode)
+				if labels == nil then
+					finish(nil, perr)
+					return
+				end
+				local fetched = os.time()
+				local dir = Metadata().cacheDir(data, account) :: string
+				pcall(tern.process.run, Spool.writeArgv(dir, path), {
+					stdin = tern.json.encode(Metadata().cacheEntry(account, recordType, labels, fetched)),
+					timeout_ms = 10000,
+				}, function(r: ProcessResult)
+					if r.status ~= 0 then
+						log.warn("tern-netsuite ns: could not cache field labels", r.stderr)
+					end
+				end)
+				finish({ labels = labels, fetched = fetched, cached = false }, nil)
+			end)
+		end)
 	end)
 end
 
@@ -436,6 +537,38 @@ local function serveQuery(id: string, recorded: string)
 			})
 		else
 			respond(id, failure(id, qerr :: NsError))
+		end
+	end)
+end
+
+local function serveMetadata(id: string, recorded: string)
+	local text = claim(Spool.path(spoolDir(), "meta", id), Spool.MAX_REQUEST_BYTES)
+	if text == nil then
+		return
+	end
+	local req, err = Spool.decodeMetadata(text, id, os.time(), tern.json.decode)
+	if req == nil then
+		respond(id, failure(id, Errors.new("query", err or "unreadable request")))
+		return
+	end
+	if req.connection ~= recorded then
+		respond(id, failure(id, Errors.new("query", "the request names another connection than was recorded")))
+		return
+	end
+	local started = tern.now()
+	M.metadata(req.connection, req.record, { refresh = req.refresh }, function(result: MetadataResult?, merr: NsError?)
+		if result then
+			respond(id, {
+				v = Spool.VERSION,
+				id = id,
+				ok = true,
+				labels = result.labels,
+				fetched = result.fetched,
+				cached = result.cached,
+				ms = math.floor(tern.now() - started),
+			})
+		else
+			respond(id, failure(id, merr :: NsError))
 		end
 	end)
 end
@@ -538,6 +671,7 @@ function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
 	-- before opening the link; a VM notices another's kv write on its next
 	-- read, so a missing record is looked up again for a moment.
 	local key = Spool.pendingKey(id)
+	local requestPath = Spool.path(spoolDir(), Spool.requestKind(action :: Spool.Action), id)
 	local tries = 0
 	local function attempt()
 		tries += 1
@@ -550,13 +684,16 @@ function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
 		end
 		local why = Spool.checkPending(if okGet then stored else nil, action, os.time())
 		if why then
-			pcall(tern.fs.remove, Spool.path(spoolDir(), if action == "query" then "query" else "cred", id))
+			pcall(tern.fs.remove, requestPath)
 			pcall(function()
 				cx:toast("error", "Tern NetSuite: " .. why)
 			end)
 		elseif action == "query" then
 			ConfigHost.load()
 			serveQuery(id, stored.connection)
+		elseif action == "metadata" then
+			ConfigHost.load()
+			serveMetadata(id, stored.connection)
 		else
 			serveCredentials(id, action == "forget", stored.connection, cx)
 		end

@@ -4,12 +4,15 @@
 -- on Tern 0.6.3), so host blocks and lenses query through it: a request
 -- file in the 0700 spool directory plus a `tern-netsuite://ns/...` link
 -- opened with the caller's cx; the window writes `<id>.resp.json`, which a
--- timer here notices and reads. Also defines the `connect` block.
+-- timer here notices and reads. Two read-only actions: `query` (SuiteQL)
+-- and `metadata` (field labels from the REST metadata catalog, GET only).
+-- Also defines the `connect` block.
 
 local Config = require("./lib/config")
 local ConfigHost = require("./config_host")
 local Connect = require("./lib/ns/connect")
 local Errors = require("./lib/ns/errors")
+local Metadata = require("./lib/ns/metadata")
 local Query = require("./lib/ns/query")
 local Spool = require("./lib/ns/spool")
 local Sql = require("./lib/ns/sql")
@@ -28,6 +31,19 @@ export type QueryOptions = {
 	-- plus 15 s for the window round trip).
 	timeout_ms: number?,
 }
+
+export type MetadataOptions = {
+	-- The cx of the block asking; its window answers.
+	cx: EffectCx,
+	-- Ask NetSuite even when the window's cache holds labels younger than
+	-- a week.
+	refresh: boolean?,
+}
+
+-- Field labels (lower-case field name -> label), when NetSuite sent them
+-- (os.time()) and whether they came from the cache.
+export type MetadataResult = { labels: Metadata.Labels, fetched: number, cached: boolean }
+export type MetadataCallback = (result: MetadataResult?, err: NsError?) -> ()
 
 export type Status = {
 	state: "ok" | "error",
@@ -281,6 +297,60 @@ function M.query(connectionId: string, sql: string, params: { any }?, opts: Quer
 					truncated = resp.truncated == true,
 					pages = resp.pages or 0,
 					ms = resp.ms,
+				}, nil)
+			else
+				finish(nil, resp.error)
+			end
+		end
+	)
+end
+
+-- Reads the field labels of REST record type `record` (`salesorder`,
+-- `customrecord_x`) on connection `connectionId` through the window half:
+-- one GET of NetSuite's record metadata catalog, cached per account and
+-- record type for a week. RESTlet connections cannot reach the REST record
+-- service: they get an error with code Errors.REST_ONLY.
+function M.metadata(connectionId: string, record: string, opts: MetadataOptions, cb: MetadataCallback)
+	local function finish(result: MetadataResult?, err: NsError?)
+		local ok, e = try(function()
+			cb(result, err)
+		end)
+		if not ok then
+			log.warn("tern-netsuite ns metadata callback failed", e)
+		end
+	end
+	local conn = findConnection(connectionId)
+	if conn == nil then
+		finish(
+			nil,
+			Errors.new(
+				"query",
+				string.format("no connection %q in the config (connections[])", connectionId),
+				Errors.NO_CONNECTION
+			)
+		)
+		return
+	end
+	-- Checked here too, so a RESTlet connection or a bad record type never
+	-- costs a window round trip.
+	local refused = Metadata.refusal(conn, record)
+	if refused then
+		finish(nil, refused)
+		return
+	end
+	exchange(
+		opts.cx,
+		"metadata",
+		"query",
+		"meta",
+		{ connection = connectionId, record = record, refresh = opts.refresh == true },
+		conn.timeout_ms + ROUND_TRIP_MS,
+		function(resp: Spool.Response)
+			if resp.ok then
+				finish({
+					labels = Metadata.clean(resp.labels),
+					fetched = resp.fetched or os.time(),
+					cached = resp.cached == true,
 				}, nil)
 			else
 				finish(nil, resp.error)

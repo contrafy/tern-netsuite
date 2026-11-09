@@ -51,6 +51,24 @@ function M.restlet(accountId: string, script: string, deploy: string): string
 	)
 end
 
+-- Whether `record` is a REST record type id safe to place in a URL path
+-- (lower case: `salesorder`, `customrecord_acme_box`).
+function M.validRecordType(record: string): boolean
+	return #record <= 100 and string.find(record, "^[a-z][a-z0-9_]*$") ~= nil
+end
+
+-- The REST record service's metadata catalog entry of one record type.
+function M.metadata(accountId: string, record: string): string
+	if not M.validRecordType(record) then
+		error(string.format("invalid record type %q", record), 2)
+	end
+	return string.format(
+		"https://%s.suitetalk.api.netsuite.com/services/rest/record/v1/metadata-catalog/%s",
+		M.host(accountId),
+		record
+	)
+end
+
 function M.token(accountId: string): string
 	return string.format("https://%s.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token", M.host(accountId))
 end

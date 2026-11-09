@@ -1,16 +1,22 @@
 --!strict
 -- Host half of the record inspector: the `inspect` block. Runs the effects
--- of lib/inspector/state.luau (SuiteQL through NsHost, opening the record's
--- NetSuite page, focus, save, exit) and feeds results, keys and clicks back
--- as messages. Late results of a closed block are ignored.
+-- of lib/inspector/state.luau (SuiteQL and field labels through NsHost,
+-- opening the record's NetSuite page, opening a related record in a new
+-- pane through a single-use grant, focus, save, exit) and feeds results,
+-- keys and clicks back as messages. Late results of a closed block are
+-- ignored.
 
 local ConfigHost = require("./config_host")
+local Link = require("./lib/inspector/link")
 local NsHost = require("./ns_host")
 local Pane = require("./lib/pane")
 local State = require("./lib/inspector/state")
 local View = require("./lib/inspector/view")
 
 local log = tern.log
+
+local seed = string.format("inspect:%d:%.6f:%.17g:%s", os.time(), os.clock(), math.random(), tostring({}))
+local counter = 0
 
 type Host = { s: State.State, cx: BlockCx, stopped: boolean, warned: boolean, resized: boolean }
 
@@ -61,6 +67,48 @@ local function query(h: Host, e: State.Effect)
 	)
 end
 
+local function metadata(h: Host, e: State.Effect)
+	NsHost.metadata(
+		e.connection :: string,
+		e.record :: string,
+		{ cx = h.cx, refresh = e.refresh == true },
+		function(result: NsHost.MetadataResult?, err)
+			if h.stopped then
+				return
+			end
+			dispatch(h, {
+				t = "result",
+				req = e.req,
+				labels = if result then result.labels else nil,
+				fetched = if result then result.fetched else nil,
+				cached = if result then result.cached else nil,
+				err = err,
+			})
+			rerender(h)
+		end
+	)
+end
+
+-- Opens the plain inspect link `url` in a new inspect pane: the grant makes
+-- the window start it at once instead of holding it for Enter.
+local function split(h: Host, url: string)
+	counter += 1
+	local ok, err = pcall(function()
+		local start, grants, why =
+			Link.grantStart(url, tern.kv.get(Link.GRANTS_KEY), Link.newId(seed, counter), os.time())
+		if start == nil or grants == nil then
+			error(why or "not an inspect link")
+		end
+		tern.kv.set(Link.GRANTS_KEY, grants)
+		h.cx:open(start)
+	end)
+	if not ok then
+		pcall(function()
+			h.cx:toast("error", "Tern NetSuite: could not open the record in a new pane", tostring(err))
+		end)
+	end
+end
+
 function exec(h: Host, effects: { State.Effect })
 	for _, e in effects do
 		if h.stopped then
@@ -68,6 +116,10 @@ function exec(h: Host, effects: { State.Effect })
 		end
 		if e.t == "query" then
 			query(h, e)
+		elseif e.t == "metadata" then
+			metadata(h, e)
+		elseif e.t == "split" then
+			split(h, e.url or "")
 		elseif e.t == "browse" then
 			-- An https URL: window.luau's route.link leaves it to the OS browser.
 			pcall(function()
@@ -148,6 +200,7 @@ function M.register()
 						t = "action",
 						act = ev.act,
 						value = if type(ev.value) == "string" then ev.value else "",
+						shift = type(ev.mods) == "table" and table.find(ev.mods, "shift") ~= nil,
 					})
 				end
 			end,

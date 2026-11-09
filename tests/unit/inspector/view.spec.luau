@@ -143,6 +143,47 @@ describe("record inspector view", function()
 		local s = State.init({}, nil, empty, env)
 		expect(texts(View.view(s))).toContain("No connections are configured")
 	end)
+
+	it("shows a standard field's label with its column and where the labels came from", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = State.update(s, {
+			t = "result",
+			req = first(effects, "record").req,
+			rows = json.decode(fixtures.read("inspector/salesorder-rest.json")),
+		})
+		s = State.update(s, {
+			t = "result",
+			req = first(effects, "std").req,
+			labels = { tranid = "Order #" },
+			fetched = os.time(),
+			cached = true,
+		})
+		local out = texts(View.view(s))
+		expect(out).toContain("Order # (tranid)")
+		expect(out).toContain("NetSuite's metadata catalog")
+		expect(out).toContain("l refreshes")
+	end)
+
+	it("says why standard fields show column names when the labels could not be read", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=salesorder", "id=123" }, nil, cfg, env)
+		s, effects = State.update(s, {
+			t = "result",
+			req = first(effects, "record").req,
+			rows = json.decode(fixtures.read("inspector/salesorder-rest.json")),
+		})
+		s = State.update(s, {
+			t = "result",
+			req = first(effects, "std").req,
+			err = Errors.new("permission", "INSUFFICIENT_PERMISSION: REST Web Services"),
+		})
+		local out = texts(View.view(s))
+		expect(out).toContain("Standard field labels are unavailable")
+		expect(out).toContain("REST Web Services")
+	end)
+
+	it("tells the user shift+enter opens a related record in a new pane", function()
+		expect(texts(View.view(loaded({ "connection=sb-rest", "type=salesorder", "id=123" })))).toContain("shift+enter")
+	end)
 end)
 
 return nil

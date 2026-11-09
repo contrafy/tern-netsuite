@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       matrix:
         # macOS arm64 and Linux x86_64: the hosts scripts/bootstrap.sh supports.
-        os: [macos-14, ubuntu-24.04]
+        os: [macos-15, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:

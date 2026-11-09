@@ -103,6 +103,46 @@ describe("a deploy record", function()
 		expect(r.line).toBe("NS_TOKEN=… DEBUG=… suitecloud project:deploy && FOO=… echo done")
 	end)
 
+	it("redacts assignments anywhere the recogniser still finds a deploy", function()
+		local lines = {
+			"export NS_TOKEN=s3cr3t && suitecloud project:deploy",
+			"env -i NS_TOKEN=s3cr3t suitecloud project:deploy",
+			"env -u HOME NS_TOKEN=s3cr3t suitecloud project:deploy",
+			"(NS_TOKEN=s3cr3t suitecloud project:deploy)",
+			"sleep 1 & NS_TOKEN=s3cr3t suitecloud project:deploy",
+			"true\nNS_TOKEN=s3cr3t suitecloud project:deploy",
+			"time NS_TOKEN=s3cr3t suitecloud project:deploy",
+			"command NS_TOKEN=s3cr3t suitecloud project:deploy",
+			"declare -x NS_TOKEN=s3cr3t; suitecloud project:deploy",
+			"{ NS_TOKEN=s3cr3t suitecloud project:deploy; }",
+			'NS_TOKEN="a\\"s3 cr3t" suitecloud project:deploy',
+			"if true; then NS_TOKEN=s3cr3t suitecloud project:deploy; fi",
+			'NS_TOKEN="s3 cr3t" suitecloud project:deploy',
+		}
+		for _, line in lines do
+			local r = Record.build(input(line))
+			expect((string.find(r.line, "s3", 1, true))).toBeNil()
+			expect((string.find(r.line, "NS_TOKEN=…", 1, true)) ~= nil).toBe(true)
+		end
+		local r = Record.build(input("(NS_TOKEN=s3cr3t suitecloud project:deploy) &"))
+		expect(r.line).toBe("(NS_TOKEN=… suitecloud project:deploy) &")
+	end)
+
+	it("leaves flags and paths with `=` alone", function()
+		local r = Record.build(input("suitecloud project:deploy --log=logs/a=b.log"))
+		expect(r.line).toBe("suitecloud project:deploy --log=logs/a=b.log")
+	end)
+
+	it("records an unknown status when the line's exit status is not the deploy's", function()
+		local r = Record.build(input("suitecloud project:deploy | tee deploy.log", { status = 0 }))
+		expect(r.status).toBeNil()
+		local back = Record.decode(Record.encode(r), function(s)
+			return json.decode(s)
+		end)
+		expect(back and back.status).toBeNil()
+		expect(back ~= nil).toBe(true)
+	end)
+
 	it("round-trips through one JSON line", function()
 		local r = Record.build(input("suitecloud project:deploy --log logs/d.log"))
 		local line = Record.encode(r)

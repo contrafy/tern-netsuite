@@ -26,6 +26,7 @@ export type State = {
 	guardLoad: Load,
 	ciLoad: Load,
 	localError: string?,
+	guardError: string?,
 	ciError: string?,
 	-- Why CI runs are not shown, when they are off.
 	ciNote: string?,
@@ -308,8 +309,12 @@ local function loaded(s: State, msg: Msg)
 			s.records = records
 		end
 	elseif t == "guard" then
-		s.guardLoad = "ok"
-		s.guards = GuardLog.parse(table.concat(Store.lines(msg.text, M.MAX_GUARD_LINES), "\n"), s.decode)
+		-- A failed read keeps the decisions already folded in.
+		s.guardLoad = if msg.error then "error" else "ok"
+		s.guardError = msg.error
+		if msg.error == nil then
+			s.guards = GuardLog.parse(table.concat(Store.lines(msg.text, M.MAX_GUARD_LINES), "\n"), s.decode)
+		end
 	elseif t == "ci" then
 		if msg.status == 0 then
 			local runs, err = Ci.parse(msg.stdout or "", s.decode)
@@ -356,7 +361,8 @@ function M.update(s: State, msg: Msg): (State, { Effect })
 	elseif t == "action" then
 		return s, action(s, msg.act or "", msg.value)
 	elseif t == "recorded" then
-		return s, { { t = "read_local", gen = s.gen } }
+		-- The guard wrote its decision while the deploy ran.
+		return s, { { t = "read_local", gen = s.gen }, { t = "read_guard", gen = s.gen } }
 	end
 	if msg.gen ~= s.gen then
 		return s, {}

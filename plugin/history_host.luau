@@ -306,6 +306,9 @@ end
 
 local exec: (h: Host, effects: { State.Effect }) -> ()
 
+local grantSeed = string.format("history:%d:%.6f:%.17g:%s", os.time(), os.clock(), math.random(), tostring({}))
+local grantCounter = 0
+
 local function warnOnce(h: Host, what: string, err: any)
 	if not h.warned then
 		h.warned = true
@@ -373,9 +376,21 @@ function exec(h: Host, effects: { State.Effect })
 				h.cx:open(e.url :: string)
 			end)
 		elseif t == "log" then
-			pcall(function()
-				h.cx:open(Link.failedLog(e.repo :: string, e.runId :: number))
+			-- A single-use grant: the link itself names no repository.
+			grantCounter += 1
+			local id = Link.newId(grantSeed, grantCounter)
+			local ok, err = pcall(function()
+				tern.kv.set(
+					Link.GRANTS_KEY,
+					Link.addGrant(tern.kv.get(Link.GRANTS_KEY), id, e.repo :: string, e.runId :: number, os.time())
+				)
+				h.cx:open(Link.failedLogUrl(id))
 			end)
+			if not ok then
+				pcall(function()
+					h.cx:toast("error", "Tern NetSuite: could not open the run's log", tostring(err))
+				end)
+			end
 		elseif t == "copy" then
 			pcall(function()
 				h.cx:copy(e.text :: string)
@@ -461,9 +476,13 @@ function M.register()
 		end,
 		key = function(h: Host, key: Key, cx: BlockCx): boolean?
 			h.cx = cx
+			-- Chords (Cmd+C, Ctrl+R) belong to Tern, not to the c/r actions.
+			if key.ctrl or key.meta or key.alt then
+				return false
+			end
 			local name = key.name
 			-- Shifted letters (G) arrive as their text.
-			if key.text and string.match(key.text, "^%g$") and not key.ctrl and not key.meta and not key.alt then
+			if key.text and string.match(key.text, "^%g$") then
 				name = key.text
 			end
 			if not State.handles(name) then

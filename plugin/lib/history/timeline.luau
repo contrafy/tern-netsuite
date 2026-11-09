@@ -89,6 +89,9 @@ local function localStatus(r: Record.Record, guard: GuardLog.Decision?): (string
 		return "denied", "warning"
 	elseif guard == "cancelled" then
 		return "cancelled", "muted"
+	elseif r.status == nil then
+		-- A pipe or a later command decided the line's status.
+		return "unknown", "muted"
 	elseif r.status == 0 then
 		return "ok", "success"
 	elseif r.status == 130 then

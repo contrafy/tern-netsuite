@@ -17,7 +17,9 @@ export type Record = {
 	cwd: string,
 	command: string,
 	line: string,
-	status: number,
+	-- nil when the line's exit status may not be the deploy's
+	-- (`suitecloud project:deploy | tee log`).
+	status: number?,
 	tookMs: number,
 	project: string?,
 	root: string?,
@@ -38,6 +40,7 @@ export type Record = {
 export type Input = {
 	finishedAt: number,
 	tookMs: number,
+	-- The whole line's exit status.
 	status: number,
 	line: string,
 	cwd: string,
@@ -76,7 +79,8 @@ local KEYS: { { string } } = {
 	{ "log", "log" },
 }
 
-local NUMBERS: { [string]: boolean } = { at = true, startedAt = true, status = true, tookMs = true }
+local NUMBERS: { [string]: boolean } = { at = true, startedAt = true, tookMs = true }
+local OPTIONAL_NUMBERS: { [string]: boolean } = { status = true }
 local BOOLEANS: { [string]: boolean } = { production = true, dirty = true }
 local SOURCES: { [string]: boolean } = { configured = true, cli = true, unknown = true }
 
@@ -101,61 +105,44 @@ local function cap(line: string): string
 	return cut .. ELLIPSIS
 end
 
--- Splits a shell line into words and separators (whitespace runs and the
--- control operators `&&`, `||`, `;`, `|`), keeping quotes inside words.
-local function tokens(line: string): { { text: string, sep: string? } }
-	local out: { { text: string, sep: string? } } = {}
+-- `NAME=value` words often carry tokens, and the shell takes them as
+-- assignments after `export`/`env`/`declare`, inside subshells and groups,
+-- after `&` or a newline: the value of every such word is replaced before
+-- anything reaches the history file, wherever it sits in the line. Words are
+-- cut where Recognize cuts commands, so `(TOKEN=x` is seen as `TOKEN=x`.
+local function redactAssignments(line: string): string
+	local parts: { string } = {}
 	local i, n = 1, #line
 	while i <= n do
-		local ws = string.match(line, "^%s+", i)
-		local op = string.match(line, "^&&", i) or string.match(line, "^||", i) or string.match(line, "^[;|]", i)
-		if ws then
-			table.insert(out, { text = ws, sep = "space" })
-			i += #ws
-		elseif op then
-			table.insert(out, { text = op, sep = "op" })
-			i += #op
+		local gap = string.match(line, "^[%s;|&(){}!]+", i)
+		if gap then
+			table.insert(parts, gap)
+			i += #gap
 		else
 			local j = i
 			while j <= n do
 				local c = string.sub(line, j, j)
-				if string.find(c, "^%s") or c == ";" or c == "|" or string.sub(line, j, j + 1) == "&&" then
+				if string.find(c, "^[%s;|&()]") then
 					break
-				elseif c == "'" or c == '"' then
-					local close = string.find(line, c, j + 1, true)
+				elseif c == "'" then
+					local close = string.find(line, "'", j + 1, true)
 					j = if close then close + 1 else n + 1
+				elseif c == '"' then
+					j += 1
+					while j <= n and string.sub(line, j, j) ~= '"' do
+						j += if string.sub(line, j, j) == "\\" then 2 else 1
+					end
+					j += 1
 				elseif c == "\\" then
 					j += 2
 				else
 					j += 1
 				end
 			end
-			table.insert(out, { text = string.sub(line, i, j - 1) })
+			local word = string.sub(line, i, j - 1)
+			local name = string.match(word, "^([%a_][%w_]*)=")
+			table.insert(parts, if name then name .. "=" .. ELLIPSIS else word)
 			i = j
-		end
-	end
-	return out
-end
-
--- `NAME=value` words before a command (and after `env`) often carry tokens;
--- their values are replaced before anything reaches the history file.
-local function redactAssignments(line: string): string
-	local parts: { string } = {}
-	local atCommand = true
-	for _, tok in tokens(line) do
-		if tok.sep == "op" then
-			atCommand = true
-			table.insert(parts, tok.text)
-		elseif tok.sep then
-			table.insert(parts, tok.text)
-		else
-			local name = if atCommand then string.match(tok.text, "^([%a_][%w_]*)=") else nil
-			if name then
-				table.insert(parts, name .. "=" .. ELLIPSIS)
-			else
-				table.insert(parts, tok.text)
-				atCommand = atCommand and tok.text == "env"
-			end
 		end
 	end
 	return table.concat(parts)
@@ -178,7 +165,7 @@ function M.build(input: Input): Record
 		cwd = cwd,
 		command = input.match.command,
 		line = cap(redactAssignments(input.line)),
-		status = input.status,
+		status = Recognize.status(input.match, input.status),
 		tookMs = input.tookMs,
 		project = if ctx then ctx.projectName else nil,
 		root = if ctx then ctx.projectRoot else nil,
@@ -227,6 +214,10 @@ function M.decode(line: string, decode: (string) -> any): Record?
 		if NUMBERS[field] then
 			if type(v) ~= "number" then
 				return nil
+			end
+		elseif OPTIONAL_NUMBERS[field] then
+			if type(v) ~= "number" then
+				v = nil
 			end
 		elseif BOOLEANS[field] then
 			if type(v) ~= "boolean" then

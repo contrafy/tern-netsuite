@@ -144,6 +144,45 @@ describe("the history block", function()
 		expect(list.p.max.lines).toBe(View.MAX_ROWS)
 	end)
 
+	it("keeps the list at or under 200 children, counting day rules, so Tern does not virtualize it", function()
+		local lines: { string } = {}
+		-- 300 deploys, three per day: 100 day rules among them.
+		for i = 1, 300 do
+			table.insert(
+				lines,
+				line({
+					at = 1791400000 + (i // 3) * 86400 + i,
+					cwd = "/work/sdf/billing",
+					line = "suitecloud project:deploy " .. i,
+				})
+			)
+		end
+		local s =
+			State.init({ cwd = "/work/sdf/billing", settings = { max_entries = 500, ci = nil }, decode = json.decode })
+		s = State.update(s, { t = "local", gen = s.gen, text = table.concat(lines) })
+		s = State.update(s, { t = "guard", gen = s.gen, text = "" })
+		local list = find(View.view(s, FMT).main, "rows")
+		expect(#list.c <= 200).toBe(true)
+		-- Rows and rules nearly fill the 200 (a day rule may not fit).
+		expect(#list.c >= 198).toBe(true)
+		expect(list.p.selected).toBe("main.rows." .. (s.sel :: string))
+	end)
+
+	it("shows an unknown status, not ok, when a pipe decided the line's exit status", function()
+		local s =
+			State.init({ cwd = "/work/sdf/billing", settings = { max_entries = 500, ci = nil }, decode = json.decode })
+		local text = line({ at = 1791400000, cwd = "/work/sdf/billing", line = "suitecloud project:deploy | tee l" })
+		text = string.gsub(text, '"status":0,', "")
+		s = State.update(s, { t = "local", gen = s.gen, text = text })
+		s = State.update(s, { t = "guard", gen = s.gen, text = "" })
+		expect(joined(View.view(s, FMT))).toContain("[unknown:muted]")
+	end)
+
+	it("says when the guard's audit log could not be read", function()
+		local s = State.update(loaded(), { t = "guard", gen = loaded().gen, error = "timed out" })
+		expect(joined(View.view(s, FMT))).toContain("Guard decisions could not be read: timed out")
+	end)
+
 	it("flags production deploys in the error tone so they stand out", function()
 		local text = joined(View.view(loaded(), FMT))
 		expect(text).toContain("[PROD:error]")

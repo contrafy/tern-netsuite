@@ -17,10 +17,12 @@ export type Format = {
 
 local M = {}
 
--- Timeline rows drawn at most, around the selection. They sit in a list
--- that fills the pane and keeps the selection in view (ui.scroll), so the
--- block never sizes them from cx.rows, which Tern 0.7.0 leaves at 80x24.
-M.MAX_ROWS = 300
+-- List children (timeline rows plus day rules) drawn at most, around the
+-- selection. They sit in a list that fills the pane and keeps the selection
+-- in view (ui.scroll), so the block never sizes them from cx.rows, which
+-- Tern 0.7.0 leaves at 80x24. Tern virtualizes lists past 200 children and
+-- then draws only `item` nodes, so the rows must stay at or under 200.
+M.MAX_ROWS = 200
 
 local SOURCE_TONE: { [string]: string } = { ["local"] = "neutral", guard = "warning", ci = "info" }
 -- Keeps a CI row on one line in a half-width pane.
@@ -160,6 +162,12 @@ local function listView(s: State.State, fmt: Format): Node
 			ui.text({ ui.span("Local history could not be read: " .. s.localError, "error") }, { key = "lerr" })
 		)
 	end
+	if s.guardError then
+		table.insert(
+			out,
+			ui.text({ ui.span("Guard decisions could not be read: " .. s.guardError, "error") }, { key = "gerr" })
+		)
+	end
 	local items = State.visible(s)
 	if #items == 0 then
 		local loading = s.localLoad == "loading" or s.ciLoad == "loading"
@@ -170,13 +178,29 @@ local function listView(s: State.State, fmt: Format): Node
 		table.insert(out, ui.muted(text, { key = "empty" }))
 		return ui.col(out, { key = "history" })
 	end
-	local first, last = window(items, s.sel, M.MAX_ROWS)
+	-- Each day in the window adds a rule: the largest window whose rows and
+	-- rules fit (at least one row and its rule always do).
+	local function fit(size: number): (number, number, { Timeline.Day })
+		local a, b = window(items, s.sel, size)
+		local d = Timeline.group(table.move(items, a, b, 1, {}), fmt.day)
+		return a, b, d
+	end
+	local lo, hi = 1, M.MAX_ROWS - 1
+	while lo < hi do
+		local mid = (lo + hi + 1) // 2
+		local a, b, d = fit(mid)
+		if (b - a + 1) + #d <= M.MAX_ROWS then
+			lo = mid
+		else
+			hi = mid - 1
+		end
+	end
+	local first, last, days = fit(lo)
 	if first > 1 then
 		table.insert(out, ui.muted(string.format("↑ %d newer", first - 1), { key = "above" }))
 	end
-	local shown = table.move(items, first, last, 1, {})
 	local lines: { Node } = {}
-	for _, day in Timeline.group(shown, fmt.day) do
+	for _, day in days do
 		table.insert(lines, ui.rule({ day.day }, { key = "d-" .. day.day }))
 		for _, item in day.items do
 			table.insert(lines, row(item, item.key == s.sel, fmt))

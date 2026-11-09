@@ -168,14 +168,22 @@ function M.ciSegment(pane: StatusPaneInfo): StatusSegment?
 	return { text = seg.text, tone = seg.tone, icon = "cloud", command = M.COMMAND }
 end
 
+-- `tern-netsuite://history/failed-log?grant=<id>` from the history block;
+-- a link without a live grant (printed by anything else) starts nothing.
 function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
-	local parsed = Link().parse(link.url)
-	if parsed == nil then
-		cx:toast("error", "Tern NetSuite: unknown history link", link.url)
+	local id = Link().parse(link.url)
+	if id == nil then
+		cx:toast("error", "Tern NetSuite: history link refused", "Open failed runs' logs with l in the history block.")
+		return { handled = true }
+	end
+	local grant, rest, why = Link().takeGrant(tern.kv.get(Link().GRANTS_KEY), id, os.time())
+	tern.kv.set(Link().GRANTS_KEY, rest)
+	if grant == nil then
+		cx:toast("error", "Tern NetSuite: log not opened", why)
 		return { handled = true }
 	end
 	local c = ci()
-	local command = Ci.logCommand(if c then c.gh else "gh", parsed.repo, parsed.run) .. " 2>&1 | less -R"
+	local command = Ci.logCommand(if c then c.gh else "gh", grant.repo, grant.run) .. " 2>&1 | less -R"
 	local pane = cx.layout:split(link.pane, "right", { command = command, cwd = paneCwd(cx, link.pane) })
 	if pane == nil then
 		cx:copy(command)

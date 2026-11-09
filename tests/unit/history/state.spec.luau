@@ -202,9 +202,22 @@ describe("navigating the history", function()
 		expect(#State.visible(stale)).toBe(4)
 	end)
 
-	it("reloads the local history when a new deploy was recorded", function()
+	it("reloads the local history and the guard's decisions when a new deploy was recorded", function()
 		local _, effects = State.update(loaded(false), { t = "recorded" })
 		expect(find(effects, "read_local") ~= nil).toBe(true)
+		expect(find(effects, "read_guard") ~= nil).toBe(true)
+	end)
+
+	it("keeps the guard decisions it has when a later audit.log read fails", function()
+		local s = loaded(false)
+		local before = #s.guards
+		expect(before > 0).toBe(true)
+		s = State.update(s, { t = "guard", gen = s.gen, error = "timed out" })
+		expect(#s.guards).toBe(before)
+		expect(s.guardLoad).toBe("error")
+		expect(s.guardError).toBe("timed out")
+		s = State.update(s, { t = "guard", gen = s.gen, text = GUARD })
+		expect(s.guardError).toBeNil()
 	end)
 end)
 

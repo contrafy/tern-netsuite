@@ -47,6 +47,8 @@ describe("record type catalog", function()
 	it("refines a generic transaction or item row to its specific type by its code", function()
 		expect((Catalog.fromCode("transaction", "ItemShip") :: Catalog.Kind).record).toBe("itemfulfillment")
 		expect((Catalog.fromCode("item", "InvtPart") :: Catalog.Kind).record).toBe("inventoryitem")
+		expect((Catalog.fromCode("entity", "CustJob") :: Catalog.Kind).record).toBe("customer")
+		expect((Catalog.fromCode("entity", "Contact") :: Catalog.Kind).table).toBe("contact")
 		expect(Catalog.fromCode("transaction", "Nope")).toBeNil()
 	end)
 

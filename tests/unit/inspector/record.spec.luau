@@ -74,6 +74,29 @@ describe("inspected record", function()
 		end
 	end)
 
+	it("links a transaction back to what it was created from, named as NetSuite shows it", function()
+		local refs = Record.createdFrom(json.decode(fixtures.read("inspector/createdfrom-rest.json")), null)
+		expect(refs).toEqual({
+			{
+				key = "from:123",
+				label = "Created from",
+				record = "transaction",
+				id = "123",
+				name = "Sales Order #SO-1001",
+			},
+		})
+		expect(Record.createdFrom({ { createdfrom = null, name = "x" } }, null)).toEqual({})
+	end)
+
+	it("shows a generic entity row as its real type so the full record can be read", function()
+		local fields = Record.fields({ id = "42", type = "CustJob", entityid = "Acme Retail Co" }, null)
+		expect(Record.refine(kind("entity"), fields).record).toBe("customer")
+		local vendor = Record.fields({ id = "7", type = "Vendor" }, null)
+		expect(Record.refine(kind("entity"), vendor).record).toBe("vendor")
+		local unknown = Record.fields({ id = "8", type = "OtherName" }, null)
+		expect(Record.refine(kind("entity"), unknown).record).toBe("entity")
+	end)
+
 	it("points a custom record's parent at its own type", function()
 		local fields = Record.fields(json.decode(fixtures.read("inspector/customrecord-rest.json"))[1], null)
 		local refs = Record.references(Catalog.customRecord("customrecord_acme_box", "Acme box", 12), fields, {})

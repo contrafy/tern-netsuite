@@ -79,6 +79,16 @@ describe("inspector SuiteQL", function()
 		expect(q.params).toEqual({ 123 })
 	end)
 
+	it("finds what a transaction was created from through its lines, as transaction has no createdfrom", function()
+		local q = Queries.createdFrom("130")
+		expect(q.sql).toBe(
+			"SELECT DISTINCT tl.createdfrom AS createdfrom, BUILTIN.DF(tl.createdfrom) AS name"
+				.. " FROM transactionline tl WHERE tl.transaction = ? AND tl.createdfrom IS NOT NULL"
+		)
+		expect(q.params).toEqual({ 130 })
+		readOnly(q)
+	end)
+
 	it("keeps the related-record queries read-only and parameterised", function()
 		readOnly(Queries.lines("123"))
 		readOnly(Queries.children("123"))

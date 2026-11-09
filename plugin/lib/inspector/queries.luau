@@ -166,6 +166,16 @@ function M.children(id: string): Query
 	}
 end
 
+-- What a transaction was created from: its lines carry `createdfrom`.
+function M.createdFrom(id: string): Query
+	return {
+		sql = "SELECT DISTINCT tl.createdfrom AS createdfrom, BUILTIN.DF(tl.createdfrom) AS name"
+			.. " FROM transactionline tl WHERE tl.transaction = ? AND tl.createdfrom IS NOT NULL",
+		params = { num(id) },
+		max_rows = M.MAX_CHILDREN,
+	}
+end
+
 -- An entity's newest transactions.
 function M.entityTransactions(id: string): Query
 	return {

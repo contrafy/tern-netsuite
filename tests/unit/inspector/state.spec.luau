@@ -86,6 +86,7 @@ local function loadedOrder(): State.State
 	s = answer(s, q.notes, rows("notes-restlet.json"))
 	s = answer(s, q.lines, rows("lines-rest.json"))
 	s = answer(s, q.children, rows("children-rest.json"))
+	s = answer(s, q.from, {})
 	return s
 end
 
@@ -105,8 +106,59 @@ describe("record inspector state", function()
 		expect(q.record.connection).toBe("sb-rest")
 		local next: { State.Effect }
 		s, next = answer(s, q.record, rows("salesorder-rest.json"))
-		expect(partsOf(next)).toEqual({ "children", "labels", "lines", "notes" })
+		expect(partsOf(next)).toEqual({ "children", "from", "labels", "lines", "notes" })
 		expect(queries(next).notes.params).toEqual({ 123, -30 })
+	end)
+
+	it("links a fulfillment back to the order it was created from", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=itemfulfillment", "id=130" }, nil, cfg, env)
+		s, effects = answer(s, queries(effects).record, { { id = "130", type = "ItemShip", tranid = "IF-2001" } })
+		local q = queries(effects)
+		expect(q.from.params).toEqual({ 130 })
+		s = answer(s, q.from, rows("createdfrom-rest.json"))
+		local back = State.related(s)[1]
+		expect(back.label).toBe("Created from")
+		expect(back.id).toBe("123")
+		expect(back.name).toBe("Sales Order #SO-1001")
+		s = key(s, "3", "3")
+		local _, opened = key(s, "enter")
+		expect(queries(opened).record.sql).toBe("SELECT * FROM transaction WHERE id = ?")
+	end)
+
+	it("re-reads a generic entity from its own table once the row names its type, for every field", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=entity", "id=42" }, nil, cfg, env)
+		s, effects =
+			answer(s, queries(effects).record, { { id = "42", type = "CustJob", entityid = "Acme Retail Co" } })
+		local q = queries(effects)
+		expect(partsOf(effects)).toEqual({ "record" })
+		expect(q.record.sql).toBe("SELECT * FROM customer WHERE id = ?")
+		local cur = s.cur :: State.Inspection
+		expect((cur.kind :: any).record).toBe("customer")
+		s, effects = answer(s, q.record, { { id = "42", entityid = "Acme Retail Co", companyname = "Acme Retail Co" } })
+		expect(queries(effects).txns ~= nil).toBe(true)
+		expect((State.uiUrl(s))).toBe("https://1234567-sb1.app.netsuite.com/app/common/entity/custjob.nl?id=42")
+	end)
+
+	it("finishes every part of an entity re-read from its own table, system notes included", function()
+		local s, effects = State.init({ "connection=sb-rest", "type=entity", "id=42" }, nil, cfg, env)
+		s, effects =
+			answer(s, queries(effects).record, { { id = "42", type = "CustJob", entityid = "Acme Retail Co" } })
+		s, effects = answer(s, queries(effects).record, { { id = "42", entityid = "Acme Retail Co", parent = "7" } })
+		expect(queries(effects).notes.params).toEqual({ 42, -2, -9 })
+		-- answer every query, and the ones they lead to, in the order issued
+		local queue = table.clone(effects)
+		while #queue > 0 do
+			local e = table.remove(queue, 1) :: State.Effect
+			local more: { State.Effect } = {}
+			if e.t == "query" then
+				s, more = answer(s, e, if e.part == "notes" then rows("notes-restlet.json") else {})
+			elseif e.t == "metadata" then
+				s, more = State.update(s, { t = "result", req = e.req, labels = {} })
+			end
+			table.move(more, 1, #more, #queue + 1, queue)
+		end
+		expect(State.loading(s)).toBe(false)
+		expect(State.count(s, "notes")).toBe(2)
 	end)
 
 	it("shows all four views of a fully loaded record", function()

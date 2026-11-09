@@ -162,7 +162,12 @@ local function tabs(s: State): Node
 		local loading = (tab == "notes" and State.loading(s, "notes"))
 			or (
 				tab == "related"
-				and (State.loading(s, "lines") or State.loading(s, "children") or State.loading(s, "txns"))
+				and (
+					State.loading(s, "lines")
+					or State.loading(s, "children")
+					or State.loading(s, "from")
+					or State.loading(s, "txns")
+				)
 			)
 		local text = string.format("%d %s (%s)", i, TAB_LABEL[tab], if loading then "…" else tostring(n))
 		table.insert(chips, chip(text, if tab == s.tab then "accent" else "neutral", "t" .. tab, "tab=" .. tab))
@@ -270,7 +275,7 @@ local function listNodes(s: State, cur: State.Inspection): { Node }
 	local errParts: { string } = if tab == "fields"
 		then { "std", "labels-plain" }
 		elseif tab == "notes" then { "notes" }
-		else { "display", "lines", "children", "txns" }
+		else { "display", "lines", "from", "children", "txns" }
 	for _, part in errParts do
 		local e = cur.errs[part]
 		if e then

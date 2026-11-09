@@ -17,6 +17,7 @@
 --   display   display names of the reference columns
 --   notes     system notes
 --   lines     transaction lines           (transactions)
+--   from      what it was created from    (transactions)
 --   children  transactions created from it (transactions)
 --   txns      the entity's transactions    (entities)
 
@@ -108,6 +109,8 @@ export type Inspection = {
 	notes: { Record.Note }?,
 	notesTruncated: boolean,
 	lines: { Record.Line }?,
+	-- What a transaction was created from (its lines' createdfrom).
+	from: { Record.Related }?,
 	-- Transactions pointing back (created from it / the entity's).
 	back: { Record.Related }?,
 	-- Part -> token of its query in flight.
@@ -189,6 +192,11 @@ function M.related(s: State): { Record.Related }
 		return {}
 	end
 	local out: { Record.Related } = table.clone(cur.refs)
+	if cur.from then
+		for _, r in cur.from :: { Record.Related } do
+			table.insert(out, r)
+		end
+	end
 	if cur.lines then
 		for _, r in Record.lineItems(cur.lines) do
 			table.insert(out, r)
@@ -363,6 +371,7 @@ local function newInspection(ref: Ref.Ref): Inspection
 		notes = nil,
 		notesTruncated = false,
 		lines = nil,
+		from = nil,
 		back = nil,
 		pending = {},
 		errs = {},
@@ -450,6 +459,15 @@ local function onRecord(s: State, cur: Inspection, msg: Msg, effects: { Effect }
 	end
 	local fields = Record.fields(rows[1], s.env.null)
 	local kind = Record.refine(cur.kind :: Kind, fields)
+	if kind.family == "entity" and kind.table ~= (cur.kind :: Kind).table then
+		-- The generic `entity` row has a few columns; its own table has all.
+		if s.input == Ref.text(cur.ref) then
+			s.input = kind.record .. ":" .. cur.ref.id
+		end
+		cur.kind = kind
+		askRecord(s, cur, effects)
+		return
+	end
 	cur.kind = kind
 	cur.fields = fields
 	cur.title = Record.title(fields)
@@ -471,6 +489,7 @@ local function onRecord(s: State, cur: Inspection, msg: Msg, effects: { Effect }
 	if kind.family == "transaction" then
 		issue(s, cur, "lines", Queries.lines(id), effects)
 		issue(s, cur, "children", Queries.children(id), effects)
+		issue(s, cur, "from", Queries.createdFrom(id), effects)
 	elseif kind.family == "entity" then
 		issue(s, cur, "txns", Queries.entityTransactions(id), effects)
 	end
@@ -547,6 +566,8 @@ local function onResult(s: State, msg: Msg, effects: { Effect }): boolean
 		c.std = msg.labels or {}
 		c.stdFetched = msg.fetched
 		c.stdCached = msg.cached == true
+	elseif part == "from" then
+		c.from = Record.createdFrom(rows, null)
 	elseif part == "children" or part == "txns" then
 		local back = if c.back then table.clone(c.back :: { Record.Related }) else {}
 		for _, r in Record.transactions(rows, if part == "children" then "Created from this" else "Transaction", null) do

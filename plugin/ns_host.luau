@@ -77,6 +77,9 @@ type Pending = {
 	deadline: number,
 	-- The request file, removed on timeout so a late window never runs it.
 	request: string,
+	-- Its tern.kv authorization record (Spool.pendingKey) and value.
+	key: string,
+	record: Spool.Pending?,
 	reading: boolean,
 	cb: (Spool.Response) -> (),
 }
@@ -94,10 +97,10 @@ local function try(f: () -> ()): (boolean, string?)
 end
 
 local function deliver(p: Pending, resp: Spool.Response)
-	if not resp.ok and type(resp.id) == "string" then
-		-- An unanswered request leaves its record behind; the window removes
-		-- the record of every request it serves.
-		pcall(tern.kv.set, Spool.pendingKey(resp.id), nil)
+	-- The window removes the record of every request it serves, but a
+	-- removal can be lost (see poll); an unanswered request leaves it behind.
+	if p.key ~= "" then
+		pcall(tern.kv.set, p.key, nil)
 	end
 	local ok, err = try(function()
 		p.cb(resp)
@@ -119,6 +122,13 @@ end
 -- Timer callbacks must stay cheap (a slow one disables timers for the VM):
 -- this only checks for answers; reading and decoding run in a process
 -- callback.
+--
+-- Both halves write `<data>/kv.json`, and a set in one VM can drop a key
+-- the other just set (seen on Tern 0.9.13 when several requests start at
+-- once: the record was missing from kv.json and the window refused the
+-- link). So while a request file still waits for the window, its record is
+-- written again whenever it is missing; the window looks for it long
+-- enough to see that.
 function poll()
 	polling = false
 	local dir = spoolDir()
@@ -163,6 +173,14 @@ function poll()
 					Errors.NO_WINDOW
 				),
 			})
+		elseif p.record then
+			local okReq, waiting = pcall(tern.fs.exists, p.request)
+			if okReq and waiting then
+				local okGet, stored = pcall(tern.kv.get, p.key)
+				if okGet and stored == nil then
+					pcall(tern.kv.set, p.key, p.record)
+				end
+			end
 		end
 	end
 	arm()
@@ -188,7 +206,7 @@ local function exchange(
 	local text = tern.json.encode(payload)
 	local key = Spool.pendingKey(id)
 	local function fail(message: string)
-		deliver({ deadline = 0, request = path, reading = false, cb = cb }, {
+		deliver({ deadline = 0, request = path, key = key, record = nil, reading = false, cb = cb }, {
 			v = Spool.VERSION,
 			id = id,
 			ok = false,
@@ -202,15 +220,23 @@ local function exchange(
 				return
 			end
 			-- The window serves only links it can match to this record.
+			local record = Spool.pending(action, origin, payload.connection, os.time())
 			local recorded, kerr = try(function()
-				tern.kv.set(key, Spool.pending(action, origin, payload.connection, os.time()))
+				tern.kv.set(key, record)
 			end)
 			if not recorded then
 				pcall(tern.fs.remove, path)
 				fail("could not record the request: " .. tostring(kerr))
 				return
 			end
-			pending[id] = { deadline = tern.now() + timeoutMs, request = path, reading = false, cb = cb }
+			pending[id] = {
+				deadline = tern.now() + timeoutMs,
+				request = path,
+				key = key,
+				record = record,
+				reading = false,
+				cb = cb,
+			}
 			local opened, oerr = try(function()
 				cx:open(Spool.link(action, id))
 			end)

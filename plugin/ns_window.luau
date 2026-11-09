@@ -656,7 +656,9 @@ local function serveCredentials(id: string, forget: boolean, recorded: string, c
 	end)
 end
 
-local PENDING_TRIES = 10
+-- About 3 s: the host writes a record again when a set in this VM dropped
+-- it (ns_host.luau poll, every 200 ms).
+local PENDING_TRIES = 60
 local PENDING_RETRY_MS = 50
 
 -- Handles `tern-netsuite://ns/...`; window.luau dispatches area "ns" here.
@@ -667,9 +669,11 @@ function M.route(link: LinkRequest, cx: WindowCx): RouteDecision?
 		return { handled = true }
 	end
 	-- Served only when the host half recorded this id for this action; the
-	-- record is removed first, so a link works once. The host sets it just
-	-- before opening the link; a VM notices another's kv write on its next
-	-- read, so a missing record is looked up again for a moment.
+	-- record is removed first, and the request file is claimed (removed)
+	-- before serving, so a link works once. The host sets it just before
+	-- opening the link; a VM notices another's kv write on its next read, and
+	-- a concurrent set here can drop it until the host writes it again, so a
+	-- missing record is looked up again for a while.
 	local key = Spool.pendingKey(id)
 	local requestPath = Spool.path(spoolDir(), Spool.requestKind(action :: Spool.Action), id)
 	local tries = 0

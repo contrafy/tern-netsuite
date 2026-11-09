@@ -150,10 +150,10 @@ function M.display(rows: { any }?, null: any?): { [string]: string }
 end
 
 -- The more specific kind a record row shows (a `transaction` row's type
--- code, an `item` row's itemtype), else `kind`.
+-- code, an `item` row's itemtype, an `entity` row's type), else `kind`.
 function M.refine(kind: Catalog.Kind, fields: { Field }): Catalog.Kind
 	local code: string? = nil
-	if kind.family == "transaction" then
+	if kind.family == "transaction" or kind.family == "entity" then
 		code = M.value(fields, "type")
 	elseif kind.family == "item" then
 		code = M.value(fields, "itemtype")
@@ -296,6 +296,26 @@ function M.lineItems(lines: { Line }): { Related }
 				record = "item",
 				id = id,
 				name = l.itemName,
+			})
+		end
+	end
+	return out
+end
+
+-- What a transaction was created from, from a `createdFrom` query
+-- (`createdfrom`, `name`).
+function M.createdFrom(rows: { any }?, null: any?): { Related }
+	local out: { Related } = {}
+	for _, r in (rows or {}) :: { any } do
+		local row = lowerKeys(r)
+		local id = Ref.id(M.text(row.createdfrom, null) or "")
+		if id then
+			table.insert(out, {
+				key = "from:" .. id,
+				label = "Created from",
+				record = "transaction",
+				id = id,
+				name = M.text(row.name, null),
 			})
 		end
 	end

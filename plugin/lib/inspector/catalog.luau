@@ -86,15 +86,16 @@ local TRANSACTIONS: { { string } } = {
 	{ "transaction", "Transaction", "transaction", "" },
 }
 
--- record, label, table, UI page (under ENTITY_UI), system note type.
+-- record, label, table, UI page (under ENTITY_UI), system note type, the
+-- generic `entity` row's `type` code.
 local ENTITIES: { { any } } = {
-	{ "customer", "Customer", "customer", "custjob", -2 },
-	{ "job", "Project", "job", "custjob", -7 },
-	{ "vendor", "Vendor", "vendor", "vendor", -3 },
-	{ "employee", "Employee", "employee", "employee", -4 },
-	{ "partner", "Partner", "partner", "partner", -5 },
-	{ "contact", "Contact", "contact", "contact", -6 },
-	{ "entity", "Entity", "entity", "entity", 0 },
+	{ "customer", "Customer", "customer", "custjob", -2, "CustJob" },
+	{ "job", "Project", "job", "custjob", -7, "Job" },
+	{ "vendor", "Vendor", "vendor", "vendor", -3, "Vendor" },
+	{ "employee", "Employee", "employee", "employee", -4, "Employee" },
+	{ "partner", "Partner", "partner", "partner", -5, "Partner" },
+	{ "contact", "Contact", "contact", "contact", -6, "Contact" },
+	{ "entity", "Entity", "entity", "entity", 0, "" },
 }
 -- Every entity's notes may also be filed under the generic entity type.
 local ENTITY_NOTES = -9
@@ -142,11 +143,12 @@ local ALIASES: { [string]: string } = {
 }
 
 -- Columns that point at other records, per family (custom fields that
--- point at custom records are found through the field metadata instead).
+-- point at custom records are found through the field metadata instead;
+-- what a transaction was created from comes from its lines, as SuiteQL's
+-- `transaction` has no createdfrom column).
 local REFS: { [string]: { RefColumn } } = {
 	transaction = {
 		{ column = "entity", record = "entity", label = "Entity" },
-		{ column = "createdfrom", record = "transaction", label = "Created from" },
 		{ column = "opportunity", record = "transaction", label = "Opportunity" },
 		{ column = "intercotransaction", record = "transaction", label = "Intercompany transaction" },
 		{ column = "employee", record = "employee", label = "Employee" },
@@ -185,7 +187,7 @@ local REFS: { [string]: { RefColumn } } = {
 local byRecord: { [string]: Kind } = {}
 local byPath: { [string]: Kind } = {}
 local byTable: { [string]: Kind } = {}
-local byCode: { [string]: { [string]: Kind } } = { transaction = {}, item = {} }
+local byCode: { [string]: { [string]: Kind } } = { transaction = {}, item = {}, entity = {} }
 
 local function add(k: Kind)
 	table.freeze(k.notes)
@@ -223,7 +225,7 @@ for _, e in ENTITIES do
 		family = "entity",
 		table = e[3] :: string,
 		ui = ENTITY_UI .. (e[4] :: string) .. ".nl",
-		code = nil,
+		code = if e[6] == "" then nil else e[6] :: string,
 		notes = if note == 0 then { ENTITY_NOTES } else { note, ENTITY_NOTES },
 	})
 end

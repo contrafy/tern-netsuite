@@ -1,12 +1,14 @@
 --!strict
 -- SuiteQL for the script deployments view and the row model it reads.
 --
--- `scriptdeployment` joined with `script` (the join and the scriptid /
--- title / status / isdeployed columns are what the health block already
--- reads). `primarykey` is the deployment's internal id, which the NetSuite
--- UI page needs; `script` is the script's internal id. Schedules
--- (recurrence, start time) are not scriptable on the deployment record, so
--- only the status (SCHEDULED / NOTSCHEDULED) says whether one is scheduled.
+-- `scriptdeployment` joined with `script`. Checked live on a sandbox
+-- through a RESTlet (2026-11): `primarykey` is the deployment's internal id
+-- (a number), `loglevel` is DEBUG / AUDIT / ERROR..., `recordtype` the
+-- upper-case record id or null, `script` the script's internal id,
+-- `scripttype` USEREVENT / SCRIPTLET / ...; the whole list (2000+ rows)
+-- comes back in one RESTlet answer. Schedules (recurrence, start time) are
+-- not scriptable on the deployment record, so only the status
+-- (SCHEDULED / NOTSCHEDULED) says whether one is scheduled.
 --
 -- Activity: `scriptnote` has no deployment column, so the last 24 hours of
 -- log lines and errors are counted per script (all its deployments).
@@ -27,9 +29,12 @@ M.ACTIVITY_SQL = "SELECT n.scripttype AS script_id, COUNT(*) AS total,"
 	.. " FROM scriptnote n WHERE n.date >= SYSDATE - 1 GROUP BY n.scripttype"
 
 export type Deployment = {
+	-- Unique in the list: `<script>:<deployment>` (see M.key). The scriptid
+	-- alone is not: NetSuite names the first deployment of a script created
+	-- in the UI `customdeploy1`, so it repeats across scripts (observed live).
+	key: string,
 	-- Internal id of the deployment record; nil when the row has none.
 	id: number?,
-	-- `customdeploy_x`, lower case.
 	scriptId: string,
 	title: string,
 	-- Upper case, e.g. RELEASED; "" when unknown.
@@ -75,6 +80,12 @@ local function bool(v: any): boolean?
 	return nil
 end
 
+-- The list key of deployment `scriptId` of script `script` (scriptids,
+-- any case). SDF objects nest deployments inside their script the same way.
+function M.key(script: string?, scriptId: string): string
+	return string.lower(script or "") .. ":" .. string.lower(scriptId)
+end
+
 -- The deployment a SuiteQL row describes, or nil when it has no scriptid.
 function M.fromRow(row: any): Deployment?
 	if type(row) ~= "table" then
@@ -87,6 +98,7 @@ function M.fromRow(row: any): Deployment?
 	local script = str(row.script)
 	local scriptType = str(row.scripttype)
 	return {
+		key = M.key(script, scriptId),
 		id = int(row.id),
 		scriptId = string.lower(scriptId),
 		title = str(row.title) or "",

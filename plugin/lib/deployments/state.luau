@@ -121,6 +121,7 @@ export type State = {
 	editing: boolean,
 	-- Opened from a plain link: nothing is queried until Enter.
 	held: boolean,
+	-- The selected deployment's key (Query.key).
 	selId: string?,
 	offset: number,
 	detailOpen: boolean,
@@ -202,7 +203,7 @@ local function indexOf(list: { Deployment }, id: string?): number
 		return 1
 	end
 	for i, d in list do
-		if d.scriptId == id then
+		if d.key == id then
 			return i
 		end
 	end
@@ -223,7 +224,7 @@ function M.owner(s: State, d: Deployment): (Owners.Owner?, string?)
 	if s.scan ~= "done" then
 		return nil, "local SDF projects are still being scanned"
 	end
-	return Owners.pick(s.owners, d.scriptId, s.cwd)
+	return Owners.pick(s.owners, d.key, s.cwd)
 end
 
 function M.activityOf(s: State, d: Deployment): Query.Activity?
@@ -555,7 +556,7 @@ local function editKey(s: State, e: Edit, key: Key, effects: { Effect }): boolea
 		elseif ch == "r" then
 			local d = M.selected(s)
 			s.edit = nil
-			if d and d.scriptId == e.deployment then
+			if d and d.key == Query.key(e.owner.object, e.deployment) then
 				return beginEdit(s, d, effects)
 			end
 		else
@@ -573,7 +574,7 @@ local function move(s: State, delta: number)
 		return
 	end
 	local i = math.clamp(indexOf(list, s.selId) + delta, 1, #list)
-	s.selId = list[i].scriptId
+	s.selId = list[i].key
 end
 
 local function selectTarget(s: State, index: number, effects: { Effect }): boolean
@@ -869,12 +870,12 @@ end
 local function settle(s: State)
 	local list = M.visible(s)
 	local i = indexOf(list, s.selId)
-	if s.selId ~= nil and (list[i] == nil or list[i].scriptId ~= s.selId) then
+	if s.selId ~= nil and (list[i] == nil or list[i].key ~= s.selId) then
 		s.selId = nil
 		i = 1
 	end
 	if s.selId == nil and list[1] then
-		s.selId = list[1].scriptId
+		s.selId = list[1].key
 	end
 	s.offset = M.window(i, #list, s.offset, M.MAX_RENDER_ROWS)
 end

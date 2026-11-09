@@ -111,6 +111,11 @@ describe("health dashboard", function()
 		expect(chart.p.series[24].value).toBe(5)
 	end)
 
+	it("names each listed deployment's script, since ids like customdeploy1 repeat across scripts", function()
+		local text = texts(View.render({ entries = { entry(polled()) }, now = NOW }).main)
+		expect(text).toContain("customscript_demo_test")
+	end)
+
 	it("lists the keys it answers to", function()
 		local text = texts(View.render({ entries = {}, now = NOW }).dock)
 		expect(text).toContain("refresh")

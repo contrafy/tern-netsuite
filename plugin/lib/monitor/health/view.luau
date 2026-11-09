@@ -91,6 +91,7 @@ local function deployments(s: Model.Summary): Node?
 			lines,
 			ui.text({
 				ui.span(d.scriptid, "strong"),
+				ui.span(if d.script then "  " .. d.script else "", "muted"),
 				ui.span("  " .. d.title),
 				ui.span(
 					"  " .. string.lower(d.status) .. (if d.deployed then "" else ", not deployed"),

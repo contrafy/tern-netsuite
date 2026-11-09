@@ -1,0 +1,7 @@
+{"ok":true,"rows":[
+{"id":1526,"scriptid":"customdeploy1","title":null,"status":"RELEASED","isdeployed":"T","loglevel":"DEBUG","recordtype":null,"script_id":1401,"script":"customscript_acme_label_portlet","script_name":"Acme Label Portlet","scripttype":"PORTLET"},
+{"id":1583,"scriptid":"customdeploy1","title":"Order Search","status":"RELEASED","isdeployed":"T","loglevel":"ERROR","recordtype":null,"script_id":1402,"script":"customscript_acme_order_search","script_name":"Acme Order Search","scripttype":"SCRIPTLET"},
+{"id":1677,"scriptid":"customdeploy2","title":null,"status":"RELEASED","isdeployed":"F","loglevel":"ERROR","recordtype":null,"script_id":1402,"script":"customscript_acme_order_search","script_name":"Acme Order Search","scripttype":"SCRIPTLET"},
+{"id":163,"scriptid":"customdeploy_acme_payment_ue","title":"Payment Guard","status":"RELEASED","isdeployed":"T","loglevel":"ERROR","recordtype":"VENDORPAYMENT","script_id":142,"script":"customscript_acme_payment_ue","script_name":"Acme Payment Guard","scripttype":"USEREVENT"},
+{"id":4066,"scriptid":"customdeploy_acme_install_mr","title":"Install Items","status":"NOTSCHEDULED","isdeployed":"T","loglevel":"AUDIT","recordtype":null,"script_id":1403,"script":"customscript_acme_install_mr","script_name":"Acme Install Items","scripttype":"MAPREDUCE"}
+]}

@@ -1,10 +1,12 @@
 --!strict
 -- Which local SDF project owns a script deployment: the projects the
--- deployments block scanned (lib/sdf/project.luau) indexed by deployment
--- scriptid, the owner an edit applies to, and the deploy command the user
--- runs afterwards (never the block: deploys go through the guard).
+-- deployments block scanned (lib/sdf/project.luau) indexed by Query.key
+-- (script and deployment scriptid), the owner an edit applies to, and the
+-- deploy command the user runs afterwards (never the block: deploys go
+-- through the guard).
 
 local Project = require("../sdf/project")
+local Query = require("./query")
 
 local M = {}
 
@@ -31,8 +33,8 @@ function M.index(projects: { Project.Project }): Index
 	for _, p in projects do
 		for _, o in p.objects do
 			for _, d in o.deployments do
-				local key = string.lower(d.scriptId)
-				if key ~= "" then
+				local key = Query.key(o.scriptId, d.scriptId)
+				if d.scriptId ~= "" then
 					local list = out[key]
 					if list == nil then
 						list = {}
@@ -59,10 +61,11 @@ local function inside(path: string, root: string): boolean
 	return path == root or string.sub(path, 1, #root + 1) == root .. "/"
 end
 
--- The owner an edit of deployment `id` applies to, or nil and why: the
--- only owner, or the one containing `cwd` when several projects ship it.
-function M.pick(index: Index, id: string, cwd: string?): (Owner?, string?)
-	local list = index[string.lower(id)]
+-- The owner an edit of the deployment with Query.key `key` applies to, or
+-- nil and why: the only owner, or the one containing `cwd` when several
+-- projects ship it.
+function M.pick(index: Index, key: string, cwd: string?): (Owner?, string?)
+	local list = index[string.lower(key)]
 	if list == nil or #list == 0 then
 		return nil, "no local SDF project defines this deployment"
 	end

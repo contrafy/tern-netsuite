@@ -205,7 +205,7 @@ local function rowNode(s: State, d: Deployment, selected: boolean): Node
 	for _, a in act do
 		actWidth += width(a.t)
 	end
-	local local_ = s.scan == "done" and s.owners[d.scriptId] ~= nil
+	local local_ = s.scan == "done" and s.owners[d.key] ~= nil
 	local localWidth = if local_ then 7 else 0
 	if actWidth + localWidth > room then
 		act, actWidth = {}, 0
@@ -223,7 +223,7 @@ local function rowNode(s: State, d: Deployment, selected: boolean): Node
 	if local_ then
 		table.insert(spans, ui.span("  local", "accent"))
 	end
-	return ui.text(spans, { key = "r-" .. d.scriptId, actions = { click = "sel=" .. d.scriptId } })
+	return ui.text(spans, { key = "r-" .. d.key, actions = { click = "sel=" .. d.key } })
 end
 
 local function countsLine(s: State, shown: number): Node
@@ -278,7 +278,7 @@ local function rows(s: State): { Node }
 	for i = first, last do
 		table.insert(lines, rowNode(s, list[i], i == sel))
 	end
-	table.insert(out, ui.scroll("rows", lines, "r-" .. list[sel].scriptId, State.MAX_RENDER_ROWS))
+	table.insert(out, ui.scroll("rows", lines, "r-" .. list[sel].key, State.MAX_RENDER_ROWS))
 	if last < #list then
 		table.insert(
 			out,

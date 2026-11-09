@@ -70,8 +70,15 @@ local function loaded(connection: string?, authId: string?): State.State
 	return s
 end
 
+-- Selects the row of deployment `id` (the first one when several scripts
+-- share it) the way a click does.
 local function select(s: State.State, id: string): State.State
-	return (State.update(s, { t = "action", act = "sel", value = id }))
+	for _, d in s.rows do
+		if d.scriptId == id then
+			return (State.update(s, { t = "action", act = "sel", value = d.key }))
+		end
+	end
+	error("no row " .. id)
 end
 
 local function viewText(node: any, out: { string }?): string
@@ -213,7 +220,32 @@ describe("browsing", function()
 		end
 		assert(list, "row list")
 		expect(#list.c <= State.MAX_RENDER_ROWS).toBe(true)
-		expect(list.p.selected).toBe("main.rows.r-customdeploy_300")
+		expect(list.p.selected).toBe("main.rows.r-:customdeploy_300")
+	end)
+
+	it("tells apart deployments that share a scriptid under different scripts", function()
+		-- Live: NetSuite names the first deployment of a UI-created script
+		-- customdeploy1, so the id repeats across scripts.
+		local rows = json.decode(fixtures.read("deployments/list-restlet.json")).rows
+		local s, effects = State.init({}, nil, cfg, nil)
+		s = State.update(s, { t = "result", req = (find(effects, "query") :: State.Effect).req, rows = rows })
+		local list: any = nil
+		for _, c in (View.view(s).main :: any).c do
+			if c.k == "list" then
+				list = c
+			end
+		end
+		assert(list, "row list")
+		local seen: { [string]: boolean } = {}
+		for _, row in list.c do
+			expect(seen[row.p.key]).toBeNil()
+			seen[row.p.key] = true
+		end
+		local second = State.visible(s)[2]
+		expect(second.scriptId).toBe("customdeploy1")
+		s = State.update(s, { t = "action", act = "sel", value = second.key })
+		local _, a = press(s, "o", "o")
+		expect((find(a, "open") :: State.Effect).url).toContain("scriptrecord.nl?id=" .. tostring(second.id))
 	end)
 end)
 

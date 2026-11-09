@@ -33,6 +33,7 @@ describe("deployment rows", function()
 		local list = Query.fromRows(items("list-rest.json"))
 		expect(#list).toBe(5)
 		expect(list[3]).toEqual({
+			key = "customscript_acme_order_ue:customdeploy_acme_order_ue",
 			id = 203,
 			scriptId = "customdeploy_acme_order_ue",
 			title = "Order Guard",
@@ -64,6 +65,7 @@ describe("deployment rows", function()
 			script_id = 3,
 		})
 		expect(d).toEqual({
+			key = ":customdeploy_x",
 			id = 7,
 			scriptId = "customdeploy_x",
 			title = "",
